@@ -1,14 +1,24 @@
 # Crawl African Stores Canada directory (Bedrock + pipeline)
 #
-# Required GitHub secrets (repo or org → Settings → Secrets and variables → Actions):
-#   AWS_ACCESS_KEY_ID
-#   AWS_SECRET_ACCESS_KEY
-#   AWS_SESSION_TOKEN          (optional — only if using temporary creds)
+# Auth: GitHub OIDC → AWS IAM role (no long-lived access keys in secrets)
 #
-# Optional repository variables (Settings → Secrets and variables → Variables):
-#   AWS_REGION                 (default: us-east-1)
-#   BEDROCK_MODEL_ID           (default: anthropic.claude-haiku-4-5-20251001-v1:0)
-#   BEDROCK_USE_REGIONAL       (set to "true" for us.anthropic... cross-region ID)
+# One-time AWS setup:
+#   1. IAM → Identity providers → Add provider (GitHub Actions OIDC)
+#      URL: https://token.actions.githubusercontent.com
+#      Audience: sts.amazonaws.com
+#   2. IAM → Roles → Create role → Web identity → that provider
+#      Trust: repo + branch in token.actions.githubusercontent.com:sub
+#      Permissions: bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream
+#   3. Copy role ARN
+#
+# GitHub — Settings → Secrets and variables → Actions → Variables (required):
+#   AWS_ROLE_ARN = arn:aws:iam::ACCOUNT_ID:role/github-actions-african-stores
+# (Secret also works if you named it AWS_ROLE_ARN there instead.)
+#
+# Trust policy sub must match the branch you run from (e.g. repo:ORG/REPO:*).
+#
+# Optional variables:
+#   AWS_REGION, BEDROCK_MODEL_ID, BEDROCK_USE_REGIONAL
 
 name: Crawl directory
 
@@ -21,10 +31,10 @@ on:
         default: test
         type: choice
         options:
-          - test       # Toronto single-category pipeline + generate site
-          - full       # All cities/categories + generate (longer, more Bedrock cost)
-          - generate   # Regenerate HTML from existing DB only
-          - smoke      # Bedrock LLM + extractor smoke test (no crawl)
+          - test
+          - full
+          - generate
+          - smoke
       restore_db:
         description: Restore african_stores.db from the last successful run
         required: false
@@ -32,16 +42,11 @@ on:
         type: boolean
 
   schedule:
-    # Weekly Toronto test crawl — Sunday 12:00 UTC (change or disable to control cost)
     - cron: "0 12 * * 0"
 
 concurrency:
   group: directory-crawl-${{ github.ref }}
   cancel-in-progress: false
-
-permissions:
-  contents: read
-  actions: read # required to restore artifacts from prior runs
 
 env:
   LLM_PROVIDER: bedrock
@@ -55,6 +60,11 @@ jobs:
     name: ${{ github.event_name == 'schedule' && 'Scheduled test crawl' || format('Crawl ({0})', inputs.mode) }}
     runs-on: ubuntu-latest
     timeout-minutes: ${{ github.event_name == 'schedule' && 45 || (inputs.mode == 'full' && 180 || 45) }}
+
+    permissions:
+      id-token: write # required for OIDC — must be on the job, not only workflow root
+      contents: read
+      actions: read
 
     steps:
       - name: Checkout
@@ -70,12 +80,28 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Configure AWS credentials
+      - name: Validate AWS OIDC configuration
+        run: |
+          ROLE_ARN="${{ vars.AWS_ROLE_ARN }}"
+          if [ -z "$ROLE_ARN" ]; then
+            ROLE_ARN="${{ secrets.AWS_ROLE_ARN }}"
+          fi
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::AWS_ROLE_ARN is not set."
+            echo "Add repository Variable: Settings → Secrets and variables → Actions → Variables"
+            echo "  Name: AWS_ROLE_ARN"
+            echo "  Value: arn:aws:iam::ACCOUNT_ID:role/YOUR_ROLE_NAME"
+            exit 1
+          fi
+          echo "AWS_ROLE_ARN is set (${#ROLE_ARN} characters)"
+          echo "Workflow ref: ${{ github.ref }} (must match IAM trust policy sub condition)"
+          echo "Repository: ${{ github.repository }}"
+
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN || secrets.AWS_ROLE_ARN }}
+          role-session-name: gha-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Resolve crawl mode
