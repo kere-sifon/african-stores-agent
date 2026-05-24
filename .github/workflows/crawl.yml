@@ -37,9 +37,9 @@ on:
           - generate
           - smoke
       restore_db:
-        description: Restore african_stores.db from the last successful run
+        description: Restore prior workflow artifact (legacy SQLite/output only; not used for MongoDB)
         required: false
-        default: true
+        default: false
         type: boolean
 
   schedule:
@@ -113,7 +113,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
             echo "mode=test" >> "$GITHUB_OUTPUT"
-            echo "restore_db=true" >> "$GITHUB_OUTPUT"
+            echo "restore_db=false" >> "$GITHUB_OUTPUT"
           else
             echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
             echo "restore_db=${{ inputs.restore_db }}" >> "$GITHUB_OUTPUT"
