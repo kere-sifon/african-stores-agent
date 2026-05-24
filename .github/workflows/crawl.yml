@@ -8,7 +8,8 @@
 #      Audience: sts.amazonaws.com
 #   2. IAM → Roles → Create role → Web identity → that provider
 #      Trust: repo + branch in token.actions.githubusercontent.com:sub
-#      Permissions: bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream
+#      Permissions: bedrock:InvokeModel on foundation-model/* and inference-profile/*
+#      (cross-region profile us.anthropic... routes to us-east-2 etc. — use * region in IAM)
 #   3. Copy role ARN
 #
 # GitHub — Settings → Secrets and variables → Actions → Variables (required):
