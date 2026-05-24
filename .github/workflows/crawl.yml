@@ -18,7 +18,7 @@
 # Trust policy sub must match the branch you run from (e.g. repo:ORG/REPO:*).
 #
 # Optional variables:
-#   AWS_REGION, BEDROCK_MODEL_ID, BEDROCK_USE_REGIONAL
+#   AWS_REGION, BEDROCK_MODEL_ID (default: us.anthropic... inference profile)
 
 name: Crawl directory
 
@@ -51,8 +51,7 @@ concurrency:
 env:
   LLM_PROVIDER: bedrock
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-  BEDROCK_MODEL_ID: ${{ vars.BEDROCK_MODEL_ID || 'anthropic.claude-haiku-4-5-20251001-v1:0' }}
-  BEDROCK_USE_REGIONAL: ${{ vars.BEDROCK_USE_REGIONAL || '' }}
+  BEDROCK_MODEL_ID: ${{ vars.BEDROCK_MODEL_ID || 'us.anthropic.claude-haiku-4-5-20251001-v1:0' }}
   PYTHONUNBUFFERED: "1"
 
 jobs:

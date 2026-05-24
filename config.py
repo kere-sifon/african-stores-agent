@@ -22,13 +22,9 @@ OLLAMA_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0"))
 
 # ── AWS Bedrock settings (when LLM_PROVIDER=bedrock) ─────────────────────────
 AWS_REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
+# Haiku 4.5 must be invoked via inference profile ID (not the foundation-model ID).
 BEDROCK_MODEL_ID = os.getenv(
     "BEDROCK_MODEL_ID",
-    "anthropic.claude-haiku-4-5-20251001-v1:0",
-)
-# Cross-region inference profile (optional — use if the base model ID fails)
-BEDROCK_MODEL_ID_REGIONAL = os.getenv(
-    "BEDROCK_MODEL_ID_REGIONAL",
     "us.anthropic.claude-haiku-4-5-20251001-v1:0",
 )
 BEDROCK_MAX_TOKENS = int(os.getenv("BEDROCK_MAX_TOKENS", "4096"))
@@ -61,9 +57,7 @@ OUTPUT_DIR = "output"
 
 
 def _active_bedrock_model_id() -> str:
-    """Prefer explicit BEDROCK_MODEL_ID; fall back to regional inference ID."""
-    if os.getenv("BEDROCK_USE_REGIONAL", "").lower() in ("1", "true", "yes"):
-        return BEDROCK_MODEL_ID_REGIONAL
+    """Return the Bedrock model or inference profile ID to pass to ChatBedrockConverse."""
     return BEDROCK_MODEL_ID
 
 
