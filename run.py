@@ -40,9 +40,11 @@ def generate():
 
 
 def print_stats():
+    from storage import storage_summary
+
     init_db()
     stats = get_stats()
-    print(f"\n── Database stats ──")
+    print(f"\n── Database stats ({storage_summary()}) ──")
     print(f"Total stores: {stats['total']}")
     for row in stats["by_city"]:
         print(f"  {row['city']}: {row['count']} stores")

@@ -52,8 +52,16 @@ MAX_RESULTS_PER_QUERY = 3
 CRAWL_DELAY_SECONDS = 2
 
 # ── Storage ────────────────────────────────────────────────────────────────────
-DB_PATH = "african_stores.db"
-OUTPUT_DIR = "output"
+# sqlite = local file  |  mongodb = MongoDB Atlas (set MONGODB_URI)
+_db_default = "mongodb" if os.getenv("MONGODB_URI", "").strip() else "sqlite"
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", _db_default).strip().lower()
+
+DB_PATH = os.getenv("DB_PATH", "african_stores.db")
+OUTPUT_DIR = os.getenv("OUTPUT_DIR", "output")
+
+MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
+MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "african_stores")
+MONGODB_COLLECTION = os.getenv("MONGODB_COLLECTION", "stores")
 
 
 def _active_bedrock_model_id() -> str:

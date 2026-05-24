@@ -199,8 +199,11 @@ def run_pipeline_for_city(city: str, category: str) -> int:
 
 def run_test_pipeline(city: str = "Toronto, Ontario", category: str = "African grocery store"):
     """Single city/category test run."""
+    from storage import storage_summary
+
     init_db()
-    print(f"\n🧪 Pipeline test: {category} in {city}\n")
+    print(f"\n🧪 Pipeline test: {category} in {city}")
+    print(f"   {storage_summary()}\n")
     saved = run_pipeline_for_city(city, category)
     print(f"\n✅ Done. Saved {saved} store(s) this run.")
     stats = get_stats()

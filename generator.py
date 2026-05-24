@@ -1,6 +1,6 @@
 # generator.py
 # ─────────────────────────────────────────────────────────────────────────────
-# Reads all stores from SQLite and generates:
+# Reads all stores from the configured database and generates:
 #   output/index.html         — main directory page (search + filter)
 #   output/stores/<slug>.html — individual store page
 #

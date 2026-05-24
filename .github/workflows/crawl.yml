@@ -18,8 +18,8 @@
 #
 # Trust policy sub must match the branch you run from (e.g. repo:ORG/REPO:*).
 #
-# Optional variables:
-#   AWS_REGION, BEDROCK_MODEL_ID (default: us.anthropic... inference profile)
+# Required secret: MONGODB_URI (Atlas connection string)
+# Optional variables: AWS_REGION, BEDROCK_MODEL_ID, MONGODB_DB_NAME, MONGODB_COLLECTION
 
 name: Crawl directory
 
@@ -53,6 +53,10 @@ env:
   LLM_PROVIDER: bedrock
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
   BEDROCK_MODEL_ID: ${{ vars.BEDROCK_MODEL_ID || 'us.anthropic.claude-haiku-4-5-20251001-v1:0' }}
+  STORAGE_BACKEND: mongodb
+  MONGODB_URI: ${{ secrets.MONGODB_URI }}
+  MONGODB_DB_NAME: ${{ vars.MONGODB_DB_NAME || 'african_stores' }}
+  MONGODB_COLLECTION: ${{ vars.MONGODB_COLLECTION || 'stores' }}
   PYTHONUNBUFFERED: "1"
 
 jobs:
