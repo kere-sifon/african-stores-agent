@@ -156,6 +156,8 @@ jobs:
           print('If the log mentions \"use case details\", complete the Anthropic form in')
           print('Bedrock console (us-east-1) → Model catalog → Claude Haiku 4.5 →')
           print('Submit use case details. Wait ~15 minutes, then re-run smoke.')
+          print('If the log mentions \"Marketplace\", enable the model in Bedrock console')
+          print('(Model access) as account admin, or add aws-marketplace:Subscribe to the IAM role.')
           sys.exit(1)
           PY
 
