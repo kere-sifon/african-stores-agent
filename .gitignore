@@ -19,3 +19,9 @@ african_stores.db
 
 # Env
 .env
+
+# AI / project context (local only)
+PROMPT.md
+SKILLS.md
+TODO.md
+ARCHITECTURE.md
