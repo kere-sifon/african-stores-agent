@@ -134,16 +134,26 @@ jobs:
           python -c "
           from config import get_llm
           print(get_llm().invoke('Reply in one sentence that Bedrock is working.').content)
+          print('✅ Bedrock chat OK')
           "
-          python -c "
+          python <<'PY'
+          import sys
           from extractor import extract_store_info
+
           r = extract_store_info(
               'Mama Africa Grocery, 45 Eglinton Ave, Toronto ON. West African foods.',
               'Toronto, Ontario',
           )
-          assert r and r.name, r
-          print('Extractor OK:', r.name)
-          "
+          if r and r.name:
+              print('✅ Extractor OK:', r.name)
+              sys.exit(0)
+
+          print('::error::Extractor failed.')
+          print('If the log mentions \"use case details\", complete the Anthropic form in')
+          print('Bedrock console (us-east-1) → Model catalog → Claude Haiku 4.5 →')
+          print('Submit use case details. Wait ~15 minutes, then re-run smoke.')
+          sys.exit(1)
+          PY
 
       - name: Run pipeline (test)
         if: steps.mode.outputs.mode == 'test'
