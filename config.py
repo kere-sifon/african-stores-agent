@@ -63,8 +63,11 @@ MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "african_stores")
 MONGODB_COLLECTION = os.getenv("MONGODB_COLLECTION", "stores")
 
-# Pipeline: skip saves without a street address (snippet/social extractions are usually junk)
-REQUIRE_ADDRESS = os.getenv("REQUIRE_ADDRESS", "true").lower() in ("1", "true", "yes")
+# Pipeline quality: "contact" = address OR phone OR store website | "address" = street only
+STORE_CONTACT_RULE = os.getenv("STORE_CONTACT_RULE", "contact").strip().lower()
+# Legacy alias — REQUIRE_ADDRESS=true forces strict street-address-only mode
+if os.getenv("REQUIRE_ADDRESS", "").lower() in ("1", "true", "yes"):
+    STORE_CONTACT_RULE = "address"
 
 
 def _active_bedrock_model_id() -> str:

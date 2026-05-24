@@ -32,7 +32,7 @@ from config import (
     SEARCH_QUERIES,
     MAX_RESULTS_PER_QUERY,
     CRAWL_DELAY_SECONDS,
-    REQUIRE_ADDRESS,
+    STORE_CONTACT_RULE,
 )
 from models import StoreInfo
 
@@ -51,7 +51,7 @@ HEADERS = {
 BLOCKED_DOMAINS = [
     "facebook.com", "instagram.com", "tiktok.com",
     "google.com", "google.ca", "yelp.com",
-    "twitter.com", "linkedin.com",
+    "twitter.com", "linkedin.com", "reddit.com",
 ]
 
 _ddg = DuckDuckGoSearchResults(num_results=8, output_format="list")
@@ -111,11 +111,25 @@ def scrape(url: str, max_chars: int = 4000) -> Optional[str]:
 
 # ── Step 4 + 5: Extract and save ───────────────────────────────────────────────
 
-def store_meets_quality(store: StoreInfo) -> bool:
-    """Return False if the record should not be written to the directory DB."""
-    if REQUIRE_ADDRESS and not (store.address and store.address.strip()):
+def _is_store_website(url: str) -> bool:
+    if not url or not url.strip():
         return False
-    return True
+    return not any(domain in url for domain in BLOCKED_DOMAINS)
+
+
+def store_meets_quality(store: StoreInfo, source_url: str = "") -> bool:
+    """Return False if the record lacks enough contact info for a public directory."""
+    has_address = bool(store.address and store.address.strip())
+    has_phone = bool(store.phone and store.phone.strip())
+    website = (store.website or "").strip() or (
+        source_url.strip() if _is_store_website(source_url) else ""
+    )
+    has_website = bool(website)
+
+    if STORE_CONTACT_RULE == "address":
+        return has_address
+    # default "contact": at least one verifiable way to find the business
+    return has_address or has_phone or has_website
 
 
 def extract_and_save(text: str, city_hint: str, source_url: str) -> bool:
@@ -134,20 +148,21 @@ def extract_and_save(text: str, city_hint: str, source_url: str) -> bool:
 
     store.source_url = source_url
     if not store.city:
-        # Fall back to the city hint if the LLM didn't extract one
         store.city = city_hint.split(",")[0].strip()
+
+    if _is_store_website(source_url) and not store.website:
+        store.website = source_url
 
     if store_exists(store.name, store.city):
         print(f"  [save] Already exists: {store.name} ({store.city}) — skipped")
         return False
 
-    if not store_meets_quality(store):
-        print(f"  [save] No address — skipped (REQUIRE_ADDRESS={REQUIRE_ADDRESS})")
+    if not store_meets_quality(store, source_url):
+        print(
+            f"  [save] No address/phone/website — skipped "
+            f"(STORE_CONTACT_RULE={STORE_CONTACT_RULE})"
+        )
         return False
-
-    if source_url and not any(d in source_url for d in BLOCKED_DOMAINS):
-        if not store.website:
-            store.website = source_url
 
     success, message = save_store(store)
     print(f"  [save] {message}")
@@ -203,10 +218,7 @@ def run_pipeline_for_city(city: str, category: str) -> int:
             if extract_and_save(text, city, url):
                 saved += 1
         else:
-            # Scrape failed — try snippet as fallback
-            print(f"  [fallback] Using snippet text")
-            if save_from_snippet(snippet, title, city, url):
-                saved += 1
+            print(f"  [skip] Scrape failed — no snippet fallback (low quality)")
 
     return saved
 

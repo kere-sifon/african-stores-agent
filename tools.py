@@ -127,8 +127,8 @@ def save_store_to_db(store_json: str) -> str:
         if store_exists(store.name, store.city):
             return f"Already in database: {store.name} ({store.city}) — skipped."
 
-        if not store_meets_quality(store):
-            return "Skipped: no address (directory requires a street address)."
+        if not store_meets_quality(store, store.source_url or ""):
+            return "Skipped: needs address, phone, or store website."
 
         success, message = save_store(store)
         return message
