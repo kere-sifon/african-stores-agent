@@ -63,6 +63,9 @@ MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "african_stores")
 MONGODB_COLLECTION = os.getenv("MONGODB_COLLECTION", "stores")
 
+# Pipeline: skip saves without a street address (snippet/social extractions are usually junk)
+REQUIRE_ADDRESS = os.getenv("REQUIRE_ADDRESS", "true").lower() in ("1", "true", "yes")
+
 
 def _active_bedrock_model_id() -> str:
     """Return the Bedrock model or inference profile ID to pass to ChatBedrockConverse."""

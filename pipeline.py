@@ -32,7 +32,9 @@ from config import (
     SEARCH_QUERIES,
     MAX_RESULTS_PER_QUERY,
     CRAWL_DELAY_SECONDS,
+    REQUIRE_ADDRESS,
 )
+from models import StoreInfo
 
 import requests
 from bs4 import BeautifulSoup
@@ -109,6 +111,13 @@ def scrape(url: str, max_chars: int = 4000) -> Optional[str]:
 
 # ── Step 4 + 5: Extract and save ───────────────────────────────────────────────
 
+def store_meets_quality(store: StoreInfo) -> bool:
+    """Return False if the record should not be written to the directory DB."""
+    if REQUIRE_ADDRESS and not (store.address and store.address.strip()):
+        return False
+    return True
+
+
 def extract_and_save(text: str, city_hint: str, source_url: str) -> bool:
     """
     Send scraped text to the LangChain extraction chain, then save to DB.
@@ -131,6 +140,14 @@ def extract_and_save(text: str, city_hint: str, source_url: str) -> bool:
     if store_exists(store.name, store.city):
         print(f"  [save] Already exists: {store.name} ({store.city}) — skipped")
         return False
+
+    if not store_meets_quality(store):
+        print(f"  [save] No address — skipped (REQUIRE_ADDRESS={REQUIRE_ADDRESS})")
+        return False
+
+    if source_url and not any(d in source_url for d in BLOCKED_DOMAINS):
+        if not store.website:
+            store.website = source_url
 
     success, message = save_store(store)
     print(f"  [save] {message}")
@@ -176,10 +193,7 @@ def run_pipeline_for_city(city: str, category: str) -> int:
         print(f"    {url[:80]}")
 
         if not is_scrapeable(url):
-            print(f"  [skip] Blocked domain")
-            # Try to save from snippet instead
-            if save_from_snippet(snippet, title, city, url):
-                saved += 1
+            print(f"  [skip] Blocked domain — not saving from snippet")
             continue
 
         attempted += 1

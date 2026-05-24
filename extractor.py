@@ -29,6 +29,7 @@ Rules:
   Bad: "African Grocery Delivery Toronto | iLeOja Online African Market"
   Good: "iLeOja Online African Market"
 - If a field is not mentioned, omit it or use null
+- address: include a street address when present; do not invent one from a social media post alone
 - Write the description in an engaging, informative tone suitable for a directory
 
 {format_instructions}""",
