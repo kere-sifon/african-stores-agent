@@ -1,0 +1,94 @@
+# African Stores Canada — Cursor Rules
+# ─────────────────────────────────────────────────────────────────────────────
+# These rules are loaded by Cursor as persistent context for every AI
+# interaction in this project. Keep them updated as the project evolves.
+# ─────────────────────────────────────────────────────────────────────────────
+
+## Project Identity
+This is a Python AI agent project that crawls the web to discover and catalogue
+African stores across Canada, then generates a static HTML directory website.
+The project is a learning vehicle for LangChain — every design decision should
+reinforce understanding of agents, tools, chains, and structured output.
+
+## Owner Context
+- Developer: Kere (DevOps/MLOps background, learning LangChain)
+- Hardware: Apple M4 Mac mini, 24GB RAM, 1TB SSD
+- Local LLM stack: Ollama (http://localhost:11434), models: llama3.1:8b (primary), mistral:7b
+- No Docker — native installation only
+- Zero-cost constraint: no paid APIs unless explicitly approved
+- GitHub org: kere-sifon
+
+## Tech Stack (locked — do not suggest alternatives without asking)
+- Python 3.11+ via pyenv
+- LangChain (langchain, langchain-ollama, langchain-community) — latest stable
+- Ollama via ChatOllama for local LLM inference
+- Pydantic v2 for data models and structured output
+- SQLite for storage (via stdlib sqlite3)
+- BeautifulSoup4 + lxml + requests for scraping
+- DuckDuckGoSearchResults (no API key) for web search
+- Jinja2 for HTML templating
+- No FastAPI yet (Phase 2)
+- No Docker, no heavy ORMs
+
+## File Map
+```
+african-stores-agent/
+├── config.py         ← All settings. Edit here, never hardcode elsewhere.
+├── models.py         ← Pydantic StoreInfo model. Single source of truth.
+├── storage.py        ← All SQLite operations. No DB logic outside this file.
+├── tools.py          ← All LangChain @tool functions. Agent's hands.
+├── extractor.py      ← LCEL extraction chain (prompt | llm | parser).
+├── agent.py          ← ReAct agent setup + AgentExecutor run loop.
+├── generator.py      ← Static HTML site generator (Jinja2).
+├── run.py            ← CLI entry point.
+├── requirements.txt
+└── output/           ← Generated site (git-ignored).
+```
+
+## LangChain Conventions (enforce these)
+- Tools: always use the `@tool` decorator from `langchain_core.tools`. Write
+  detailed, accurate docstrings — the agent reads them to decide when to call.
+- Chains: use LCEL pipe syntax (`prompt | llm | parser`). Never use legacy
+  LLMChain. Never use `.run()`.
+- Prompts: use `ChatPromptTemplate.from_messages()` for chat models.
+  Use `PromptTemplate.from_template()` for ReAct system prompts.
+- Output parsers: use `JsonOutputParser(pydantic_object=Model)` for structured
+  extraction. Always call `.get_format_instructions()` for the prompt.
+- LLM: always `ChatOllama`, never `Ollama`. Pass `format="json"` when doing
+  structured extraction.
+- Agent: `create_react_agent` + `AgentExecutor`. Always set `verbose=True`
+  and `handle_parsing_errors=True`.
+
+## Code Style
+- Python 3.11+ type hints everywhere (use `X | None` not `Optional[X]`)
+- Docstrings on every public function — minimum one sentence
+- No bare `except:` — always catch specific exceptions
+- No global mutable state — pass config/connections explicitly
+- Respect `CRAWL_DELAY_SECONDS` in every function that makes HTTP requests
+- Constants in SCREAMING_SNAKE_CASE, local vars in snake_case
+- Keep functions short (< 40 lines). Extract helpers early.
+- Comments should explain *why*, not *what*
+
+## What to avoid
+- Do NOT use Docker or suggest containerisation
+- Do NOT use the OpenAI API or any paid LLM API
+- Do NOT use LangChain v0.1 / legacy patterns (LLMChain, ConversationChain, etc.)
+- Do NOT store logic in run.py — it's a thin CLI wrapper only
+- Do NOT hardcode city names, model names, or URLs outside config.py
+- Do NOT add heavy dependencies (FastAPI, Celery, Redis) without a Phase 2 ticket
+- Do NOT use async unless the function explicitly requires it (keep it sync for now)
+
+## Testing Approach
+- Test individual tools by calling them directly: `python -c "from tools import scrape_page; print(scrape_page.invoke('https://example.com'))"`
+- Test extractor separately: `python extractor.py` (add a `__main__` block with a fixture)
+- Test agent with a single city: `python run.py` (single test mode)
+- Full crawl only when single-city test passes: `python run.py --full`
+
+## Error Handling Patterns
+- Storage: return `(bool, str)` tuples — `(True, "Saved: X")` or `(False, "Error: Y")`
+- Tools: always return a string (success or error message). Never raise.
+- Extractor: return `StoreInfo | None`. Log errors, don't raise.
+- Agent: let AgentExecutor handle retries via `handle_parsing_errors=True`
+
+## Current Phase
+Phase 1 — Core agent pipeline (in progress). See TODO.md for task status.

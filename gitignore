@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Project output
+output/
+african_stores.db
+
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+*.swp
+
+# Env
+.env

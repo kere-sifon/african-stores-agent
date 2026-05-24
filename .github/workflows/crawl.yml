@@ -1,0 +1,151 @@
+# Crawl African Stores Canada directory (Bedrock + pipeline)
+#
+# Required GitHub secrets (repo or org → Settings → Secrets and variables → Actions):
+#   AWS_ACCESS_KEY_ID
+#   AWS_SECRET_ACCESS_KEY
+#   AWS_SESSION_TOKEN          (optional — only if using temporary creds)
+#
+# Optional repository variables (Settings → Secrets and variables → Variables):
+#   AWS_REGION                 (default: us-east-1)
+#   BEDROCK_MODEL_ID           (default: anthropic.claude-haiku-4-5-20251001-v1:0)
+#   BEDROCK_USE_REGIONAL       (set to "true" for us.anthropic... cross-region ID)
+
+name: Crawl directory
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: What to run
+        required: true
+        default: test
+        type: choice
+        options:
+          - test       # Toronto single-category pipeline + generate site
+          - full       # All cities/categories + generate (longer, more Bedrock cost)
+          - generate   # Regenerate HTML from existing DB only
+          - smoke      # Bedrock LLM + extractor smoke test (no crawl)
+      restore_db:
+        description: Restore african_stores.db from the last successful run
+        required: false
+        default: true
+        type: boolean
+
+  schedule:
+    # Weekly Toronto test crawl — Sunday 12:00 UTC (change or disable to control cost)
+    - cron: "0 12 * * 0"
+
+concurrency:
+  group: directory-crawl-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read # required to restore artifacts from prior runs
+
+env:
+  LLM_PROVIDER: bedrock
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  BEDROCK_MODEL_ID: ${{ vars.BEDROCK_MODEL_ID || 'anthropic.claude-haiku-4-5-20251001-v1:0' }}
+  BEDROCK_USE_REGIONAL: ${{ vars.BEDROCK_USE_REGIONAL || '' }}
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  crawl:
+    name: ${{ github.event_name == 'schedule' && 'Scheduled test crawl' || format('Crawl ({0})', inputs.mode) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event_name == 'schedule' && 45 || (inputs.mode == 'full' && 180 || 45) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve crawl mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "mode=test" >> "$GITHUB_OUTPUT"
+            echo "restore_db=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
+            echo "restore_db=${{ inputs.restore_db }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restore database from previous run
+        if: steps.mode.outputs.restore_db == 'true'
+        continue-on-error: true
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: crawl.yml
+          name: directory-data
+          path: .
+          if_no_artifact_found: ignore
+          workflow_conclusion: success
+
+      - name: Bedrock smoke test
+        if: steps.mode.outputs.mode == 'smoke'
+        run: |
+          python -c "from config import llm_config_summary; print(llm_config_summary())"
+          python -c "
+          from config import get_llm
+          print(get_llm().invoke('Reply in one sentence that Bedrock is working.').content)
+          "
+          python -c "
+          from extractor import extract_store_info
+          r = extract_store_info(
+              'Mama Africa Grocery, 45 Eglinton Ave, Toronto ON. West African foods.',
+              'Toronto, Ontario',
+          )
+          assert r and r.name, r
+          print('Extractor OK:', r.name)
+          "
+
+      - name: Run pipeline (test)
+        if: steps.mode.outputs.mode == 'test'
+        run: |
+          python run.py
+          python run.py --generate
+          python run.py --stats
+
+      - name: Run pipeline (full)
+        if: steps.mode.outputs.mode == 'full'
+        run: |
+          python run.py --full
+          python run.py --stats
+
+      - name: Generate site only
+        if: steps.mode.outputs.mode == 'generate'
+        run: |
+          test -f african_stores.db || (echo "No african_stores.db — enable restore_db or run test/full first" && exit 1)
+          python run.py --generate
+          python run.py --stats
+
+      - name: Upload database and site
+        if: always() && steps.mode.outputs.mode != 'smoke'
+        uses: actions/upload-artifact@v4
+        with:
+          name: directory-data
+          path: |
+            african_stores.db
+            output/
+          retention-days: 30
+          if-no-files-found: warn
