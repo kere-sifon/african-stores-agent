@@ -145,6 +145,21 @@ def is_yelp_biz_page(url: str) -> bool:
     return "yelp." in lower and "/biz/" in lower
 
 
+def is_yelp_search_or_list_page(url: str, title: str = "") -> bool:
+    """Yelp search results, listicles, and non-Canada SERP noise."""
+    lower = url.lower()
+    if "yelp." not in lower:
+        return False
+    if is_yelp_biz_page(url):
+        return False
+    if "/search" in lower or "find_desc=" in lower or "find_loc=" in lower:
+        return True
+    title_lower = title.lower()
+    if title_lower.startswith("top 10 best") or title_lower.startswith("top 10 "):
+        return True
+    return True
+
+
 def is_diaspora_store_listing(url: str) -> bool:
     """Single-store page on diasporastores.ca (not blog/listicle)."""
     lower = url.lower()
@@ -162,7 +177,10 @@ def search_for_city(category: str, city: str) -> list[dict]:
     merged: dict[str, dict] = {}
 
     for site in DIRECTORY_SITES[:DIRECTORY_SITES_PER_RUN]:
-        directory_query = f"{category} {city_name} {site}".strip()
+        if "yelp" in site:
+            directory_query = f"{category} {city_name} site:yelp.ca inurl:biz".strip()
+        else:
+            directory_query = f"{category} {city_name} {site}".strip()
         print(f"  📒 Directory search: {directory_query}")
         for row in search(directory_query, num_results=5):
             merged.setdefault(row["url"], row)
@@ -178,7 +196,11 @@ def search_for_city(category: str, city: str) -> list[dict]:
     for row in search(general_query, num_results=8):
         merged.setdefault(row["url"], row)
 
-    results = [r for r in merged.values() if not is_blocked_url(r["url"])]
+    results = [
+        r for r in merged.values()
+        if not is_blocked_url(r["url"])
+        and not is_yelp_search_or_list_page(r["url"], r.get("title", ""))
+    ]
     results = [
         r for r in results
         if not (
@@ -249,6 +271,8 @@ def is_blocked_url(url: str) -> bool:
         return False
     if is_yelp_biz_page(url):
         return False
+    if "yelp." in lower:
+        return True
     if is_diaspora_store_listing(url):
         return False
     if "diasporastores.ca" in lower:
@@ -614,8 +638,8 @@ def run_pipeline_for_city(city: str, category: str) -> int:
         print(f"\n  → {title[:60]}")
         print(f"    {url[:80]}")
 
-        if is_blocked_url(url):
-            print(f"  [skip] Blocked domain")
+        if is_blocked_url(url) or is_yelp_search_or_list_page(url, title):
+            print(f"  [skip] Blocked or non-business URL")
             continue
 
         if attempted >= MAX_RESULTS_PER_QUERY:
