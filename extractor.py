@@ -30,6 +30,9 @@ Rules:
   Good: "iLeOja Online African Market"
 - If a field is not mentioned, omit it or use null
 - address: include a street address when present; do not invent one from a social media post alone
+- Only extract a business that sells African groceries/food or is an African-focused shop
+- Do NOT extract major Canadian supermarket chains (Loblaws, Walmart, Metro, Sobeys, etc.)
+- Do NOT extract businesses from news articles, vlogs, or listicles about generic grocery shopping
 - Write the description in an engaging, informative tone suitable for a directory
 
 {format_instructions}""",
@@ -63,6 +66,9 @@ def extract_store_info(page_text: str, city_hint: str = "Canada") -> StoreInfo |
         result = get_extraction_chain().invoke(
             {"page_text": page_text[:3500], "city_hint": city_hint}
         )
+        if not result or not isinstance(result, dict):
+            print("  [extractor] Model returned no JSON object — skipping")
+            return None
         return StoreInfo(**result)
     except OutputParserException as e:
         print(f"  [extractor] Parser error: {e}")

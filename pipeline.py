@@ -49,10 +49,24 @@ HEADERS = {
 
 # Domains that reliably block scrapers — skip immediately
 BLOCKED_DOMAINS = [
-    "facebook.com", "instagram.com", "tiktok.com",
+    "facebook.com", "instagram.com", "tiktok.com", "youtube.com", "youtu.be",
     "google.com", "google.ca", "yelp.com",
     "twitter.com", "linkedin.com", "reddit.com",
+    "narcity.com", "blogto.com",
 ]
+
+# Major chains — never directory entries for African store searches
+EXCLUDED_MAJOR_CHAINS = (
+    "loblaws", "walmart", "metro", "sobeys", "nofrills", "no frills",
+    "costco", "superstore", "food basics", "freshco", "longo's", "farm boy",
+    "whole foods", "t&t", "shoppers drug", "giant tiger",
+)
+
+AFRICAN_SIGNALS = (
+    "african", "nigerian", "ghana", "ghanaian", "ethiopian", "somali", "kenyan",
+    "congolese", "cameroon", "senegal", "west african", "east african", "caribbean",
+    "jollof", "egusi", "plantain", "injera", "fufu", "suya", "mychopchop", "chopchop",
+)
 
 _ddg = DuckDuckGoSearchResults(num_results=8, output_format="list")
 
@@ -117,6 +131,19 @@ def _is_store_website(url: str) -> bool:
     return not any(domain in url for domain in BLOCKED_DOMAINS)
 
 
+def is_relevant_african_store(store: StoreInfo) -> bool:
+    """Filter out major chains and pages with no African focus."""
+    name_lower = (store.name or "").lower()
+    if any(chain in name_lower for chain in EXCLUDED_MAJOR_CHAINS):
+        return False
+
+    parts = [store.name or "", store.description or "", store.region_focus or ""]
+    if store.products_and_specialties:
+        parts.extend(store.products_and_specialties)
+    blob = " ".join(parts).lower()
+    return any(signal in blob or signal in name_lower for signal in AFRICAN_SIGNALS)
+
+
 def store_meets_quality(store: StoreInfo, source_url: str = "") -> bool:
     """Return False if the record lacks enough contact info for a public directory."""
     has_address = bool(store.address and store.address.strip())
@@ -155,6 +182,10 @@ def extract_and_save(text: str, city_hint: str, source_url: str) -> bool:
 
     if store_exists(store.name, store.city):
         print(f"  [save] Already exists: {store.name} ({store.city}) — skipped")
+        return False
+
+    if not is_relevant_african_store(store):
+        print(f"  [save] Not African-focused or excluded chain — skipped ({store.name})")
         return False
 
     if not store_meets_quality(store, source_url):
