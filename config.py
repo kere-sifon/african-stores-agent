@@ -57,8 +57,10 @@ DIRECTORY_SITES = [
     "site:canadianorglist.com",
 ]
 DIRECTORY_SITES_PER_RUN = int(os.getenv("DIRECTORY_SITES_PER_RUN", "2"))
+YELP_LISTINGS_PER_RUN = int(os.getenv("YELP_LISTINGS_PER_RUN", "3"))
+DIASPORA_LISTINGS_PER_RUN = int(os.getenv("DIASPORA_LISTINGS_PER_RUN", "2"))
 
-MAX_RESULTS_PER_QUERY = int(os.getenv("MAX_RESULTS_PER_QUERY", "5"))
+MAX_RESULTS_PER_QUERY = int(os.getenv("MAX_RESULTS_PER_QUERY", "8"))
 CRAWL_DELAY_SECONDS = 2
 
 # Legacy — DuckDuckGo does not index Google Maps place URLs reliably

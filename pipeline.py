@@ -35,6 +35,8 @@ from config import (
     STORE_CONTACT_RULE,
     DIRECTORY_SITES,
     DIRECTORY_SITES_PER_RUN,
+    YELP_LISTINGS_PER_RUN,
+    DIASPORA_LISTINGS_PER_RUN,
     MAPS_SEARCH_ENABLED,
     MAPS_SEARCH_RESULTS,
 )
@@ -82,9 +84,14 @@ CITY_SEARCH_ALIASES: dict[str, frozenset[str]] = {
 
 # Major chains — never directory entries for African store searches
 EXCLUDED_MAJOR_CHAINS = (
-    "loblaws", "walmart", "metro", "sobeys", "nofrills", "no frills",
-    "costco", "superstore", "food basics", "freshco", "longo's", "farm boy",
-    "whole foods", "t&t", "shoppers drug", "giant tiger",
+    "loblaws", "loblaw", "walmart", "sobeys", "nofrills", "no frills",
+    "costco", "real canadian superstore", "food basics", "freshco", "longo's",
+    "farm boy", "whole foods", "shoppers drug", "giant tiger",
+)
+
+# Directory platform names mistaken for store names by the extractor
+INVALID_BUSINESS_NAMES = (
+    "diasporastores", "diasporastores.ca", "diaspora stores", "yelp", "yelp.ca",
 )
 
 AFRICAN_SIGNALS = (
@@ -180,8 +187,31 @@ def search_for_city(category: str, city: str) -> list[dict]:
         )
     ]
     results.sort(key=_result_sort_key)
-    print(f"  Found {len(results)} scrapeable URLs")
+    results = _balance_result_queue(results)
+    print(f"  Found {len(results)} scrapeable URLs (queued for extraction)")
     return results
+
+
+def _balance_result_queue(results: list[dict]) -> list[dict]:
+    """Cap Yelp and diaspora listings so other sources get attempt slots."""
+    yelp_rows: list[dict] = []
+    diaspora_rows: list[dict] = []
+    other_rows: list[dict] = []
+
+    for row in results:
+        url = row.get("url", "")
+        if is_yelp_biz_page(url):
+            yelp_rows.append(row)
+        elif is_diaspora_store_listing(url):
+            diaspora_rows.append(row)
+        else:
+            other_rows.append(row)
+
+    return (
+        yelp_rows[:YELP_LISTINGS_PER_RUN]
+        + diaspora_rows[:DIASPORA_LISTINGS_PER_RUN]
+        + other_rows
+    )
 
 
 def _directory_domain_in_url(url: str) -> bool:
@@ -194,11 +224,11 @@ def _result_sort_key(row: dict) -> tuple[int, int]:
     url = row.get("url", "")
     title = row.get("title", "")
     lower = url.lower()
-    if is_diaspora_store_listing(url):
-        return (0, 0)
-    if is_google_maps_place(url):
-        return (0, 1)
     if is_yelp_biz_page(url):
+        return (0, 0)
+    if is_diaspora_store_listing(url):
+        return (0, 1)
+    if is_google_maps_place(url):
         return (0, 2)
     if _directory_domain_in_url(url):
         return (0, 3)
@@ -260,9 +290,54 @@ def scrape(url: str, max_chars: int = 4000) -> Optional[str]:
 # ── Step 4 + 5: Extract and save ───────────────────────────────────────────────
 
 def _is_store_website(url: str) -> bool:
-    if not url or not url.strip() or is_google_maps_place(url):
+    if not url or not url.strip():
+        return False
+    if is_google_maps_place(url) or is_yelp_biz_page(url) or is_diaspora_store_listing(url):
         return False
     return not is_blocked_url(url)
+
+
+def _is_excluded_chain(name_lower: str) -> bool:
+    for chain in EXCLUDED_MAJOR_CHAINS:
+        if re.search(rf"\b{re.escape(chain)}\b", name_lower):
+            return True
+    return False
+
+
+def _is_invalid_business_name(name: str) -> bool:
+    lower = name.strip().lower()
+    if len(lower) < 3:
+        return True
+    return any(invalid in lower for invalid in INVALID_BUSINESS_NAMES)
+
+
+def parse_listing_slug_hint(url: str) -> Optional[str]:
+    """Business name hint from diasporastores /stores/listing/slug/."""
+    match = re.search(r"/stores/listing/([^/?]+)", url, re.IGNORECASE)
+    if not match:
+        return None
+    return match.group(1).replace("-", " ").strip()
+
+
+def infer_city_from_listing_slug(url: str, aliases: frozenset[str]) -> Optional[str]:
+    """City token embedded in listing URL slug (e.g. ...-grocery-toronto)."""
+    lower = url.lower()
+    for alias in sorted(aliases, key=len, reverse=True):
+        token = alias.replace(" ", "-")
+        if re.search(rf"-{re.escape(token)}(?:-|$)", lower):
+            return alias.title()
+    return None
+
+
+def enrich_diaspora_listing_text(url: str, text: str) -> str:
+    slug_hint = parse_listing_slug_hint(url)
+    if not slug_hint:
+        return text
+    return (
+        f"This page is ONE business listing on diasporastores.ca. "
+        f"Business slug: {slug_hint}. "
+        f"Extract that business only — not the diasporastores platform.\n\n{text}"
+    )
 
 
 def parse_maps_place_name(url: str) -> Optional[str]:
@@ -350,18 +425,24 @@ def infer_city_from_address(address: str, aliases: frozenset[str]) -> Optional[s
     return None
 
 
-def apply_address_city(store: StoreInfo, city_hint: str) -> None:
-    """Prefer the city parsed from a street address over marketing copy."""
+def apply_address_city(store: StoreInfo, city_hint: str, source_url: str = "") -> None:
+    """Prefer city from listing URL slug, then street address, over marketing copy."""
     key = city_hint.strip().lower()
     aliases = CITY_SEARCH_ALIASES.get(key)
-    if not aliases or not store.address:
+    if not aliases:
+        return
+    if source_url:
+        slug_city = infer_city_from_listing_slug(source_url, aliases)
+        if slug_city:
+            store.city = slug_city
+    if not store.address:
         return
     inferred = infer_city_from_address(store.address, aliases)
     if inferred:
         store.city = inferred
 
 
-def align_city_with_search(store: StoreInfo, city_hint: str) -> bool:
+def align_city_with_search(store: StoreInfo, city_hint: str, source_url: str = "") -> bool:
     """
     Keep listings tied to the city being crawled.
     Online retailers based elsewhere may use the search city if they serve that area.
@@ -371,7 +452,7 @@ def align_city_with_search(store: StoreInfo, city_hint: str) -> bool:
     hint_city = city_hint.split(",")[0].strip()
     hint_lower = hint_city.lower()
 
-    apply_address_city(store, city_hint)
+    apply_address_city(store, city_hint, source_url)
 
     if not aliases:
         return True
@@ -416,7 +497,7 @@ def is_relevant_african_store(store: StoreInfo) -> bool:
     name, a specific region, or product signals.
     """
     name_lower = (store.name or "").lower()
-    if any(chain in name_lower for chain in EXCLUDED_MAJOR_CHAINS):
+    if _is_excluded_chain(name_lower):
         return False
 
     if any(signal in name_lower for signal in AFRICAN_SIGNALS):
@@ -463,10 +544,10 @@ def extract_and_save(text: str, city_hint: str, source_url: str) -> bool:
         print(f"  [extract] No store data extracted from {source_url}")
         return False
 
-    apply_address_city(store, city_hint)
+    apply_address_city(store, city_hint, source_url)
 
-    if not store.name or len(store.name) < 3:
-        print(f"  [extract] Extracted name too short — skipping")
+    if not store.name or _is_invalid_business_name(store.name):
+        print(f"  [extract] Invalid or platform business name — skipping")
         return False
 
     store.source_url = source_url
@@ -476,7 +557,7 @@ def extract_and_save(text: str, city_hint: str, source_url: str) -> bool:
     if _is_store_website(source_url) and not store.website:
         store.website = source_url
 
-    if not align_city_with_search(store, city_hint):
+    if not align_city_with_search(store, city_hint, source_url):
         return False
 
     if store_exists(store.name, store.city):
@@ -555,10 +636,15 @@ def run_pipeline_for_city(city: str, category: str) -> int:
 
         attempted += 1
         text = scrape(url)
-        if text and extract_and_save(text, city, url):
+        if not text:
+            print(f"  [skip] Scrape failed — no page content")
+            continue
+        if is_diaspora_store_listing(url):
+            text = enrich_diaspora_listing_text(url, text)
+        if extract_and_save(text, city, url):
             saved += 1
         else:
-            print(f"  [skip] Scrape failed or no usable content")
+            print(f"  [skip] Extracted but not saved (filters or duplicate)")
 
     return saved
 
