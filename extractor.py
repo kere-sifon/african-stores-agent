@@ -34,7 +34,8 @@ Rules:
 - products_and_specialties: list up to 8 product names or food types visible on the page
 - For online-only retailers with no street address, set city to the search area ({city_hint})
 - Only extract a business that sells African groceries/food or is an African-focused shop
-- For Google Maps listings: parse address, phone, and hours from the snippet when shown
+- For Google Maps or Yelp listings (metadata only): parse name, address, city, phone,
+  and hours from the listing title and snippet when shown
 - Do NOT extract major Canadian supermarket chains (Loblaws, Walmart, Metro, Sobeys, etc.)
 - Do NOT extract businesses from news articles, vlogs, or listicles about generic grocery shopping
 - Write the description in an engaging, informative tone suitable for a directory

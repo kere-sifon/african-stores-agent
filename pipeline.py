@@ -133,6 +133,17 @@ def is_google_maps_place(url: str) -> bool:
     return parse_maps_place_name(url) is not None
 
 
+def is_yelp_biz_page(url: str) -> bool:
+    lower = url.lower()
+    return "yelp." in lower and "/biz/" in lower
+
+
+def is_diaspora_store_listing(url: str) -> bool:
+    """Single-store page on diasporastores.ca (not blog/listicle)."""
+    lower = url.lower()
+    return "diasporastores.ca" in lower and "/stores/listing/" in lower
+
+
 def search_for_city(category: str, city: str) -> list[dict]:
     """
     Directory site: searches first, then general web. Blocked URLs are removed
@@ -179,16 +190,18 @@ def _directory_domain_in_url(url: str) -> bool:
 
 
 def _result_sort_key(row: dict) -> tuple[int, int]:
-    """Yelp /biz/ and directory hits first, then African store domains."""
+    """Scrapeable store listings first, then Yelp (metadata-only), then general."""
     url = row.get("url", "")
     title = row.get("title", "")
     lower = url.lower()
-    if is_google_maps_place(url):
+    if is_diaspora_store_listing(url):
         return (0, 0)
-    if "/biz/" in lower and "yelp." in lower:
+    if is_google_maps_place(url):
         return (0, 1)
-    if _directory_domain_in_url(url):
+    if is_yelp_biz_page(url):
         return (0, 2)
+    if _directory_domain_in_url(url):
+        return (0, 3)
     score = 1
     if "african" in lower or "african" in title.lower():
         score = 0
@@ -200,13 +213,15 @@ def _result_sort_key(row: dict) -> tuple[int, int]:
 # ── Step 2: Filter URLs ────────────────────────────────────────────────────────
 
 def is_blocked_url(url: str) -> bool:
-    """Block junk domains; allow Yelp /biz/ pages and Google Maps /place/ listings."""
+    """Block junk domains; allow Yelp /biz/, Maps /place/, diaspora store listings."""
     lower = url.lower()
     if is_google_maps_place(url):
         return False
-    if "yelp." in lower:
-        if "/biz/" in lower:
-            return False
+    if is_yelp_biz_page(url):
+        return False
+    if is_diaspora_store_listing(url):
+        return False
+    if "diasporastores.ca" in lower:
         return True
     if "google.com" in lower or "google.ca" in lower or "maps.google." in lower:
         return True
@@ -280,6 +295,49 @@ def process_maps_place(title: str, snippet: str, url: str, city_hint: str) -> bo
     """Extract store info from Maps listing metadata without scraping the Maps page."""
     print("  [maps] Using Google Maps listing (snippet + place URL)")
     text = build_maps_extraction_text(title, snippet, url, city_hint)
+    return extract_and_save(text, city_hint, url)
+
+
+def parse_yelp_slug_name(url: str) -> Optional[str]:
+    """Business name hint from /biz/slug-city segment."""
+    match = re.search(r"/biz/([^/?]+)", url, re.IGNORECASE)
+    if not match:
+        return None
+    slug = match.group(1)
+    # Drop trailing city tokens (e.g. grocery-africa-toronto-2)
+    name = re.sub(
+        r"-(?:toronto|mississauga|scarborough|vaughan|markham|brampton|ottawa|"
+        r"montreal|calgary|vancouver|canada)(?:-\d+)?$",
+        "",
+        slug,
+        flags=re.IGNORECASE,
+    )
+    return name.replace("-", " ").strip() or slug.replace("-", " ").strip()
+
+
+def build_yelp_extraction_text(title: str, snippet: str, url: str, city_hint: str) -> str:
+    """Yelp blocks scrapers — use search title/snippet (often includes address)."""
+    slug_name = parse_yelp_slug_name(url)
+    parts = [
+        "Source: Yelp business listing (search result metadata; page not scraped).",
+        f"Search area: {city_hint}.",
+        f"Listing title: {title}.",
+        f"Yelp snippet: {snippet}.",
+        f"Yelp URL: {url}.",
+    ]
+    if slug_name:
+        parts.append(f"Business name from URL slug: {slug_name}.")
+    parts.append(
+        "The listing title often contains street address and city before '- Yelp'. "
+        "Extract name, address, city, phone, hours, and category from title and snippet."
+    )
+    return " ".join(parts)
+
+
+def process_yelp_listing(title: str, snippet: str, url: str, city_hint: str) -> bool:
+    """Extract store info from Yelp search metadata (Yelp returns HTTP 403 to scrapers)."""
+    print("  [yelp] Using Yelp listing metadata (snippet + title; no scrape)")
+    text = build_yelp_extraction_text(title, snippet, url, city_hint)
     return extract_and_save(text, city_hint, url)
 
 
@@ -486,6 +544,12 @@ def run_pipeline_for_city(city: str, category: str) -> int:
         if is_google_maps_place(url):
             attempted += 1
             if process_maps_place(title, snippet, url, city):
+                saved += 1
+            continue
+
+        if is_yelp_biz_page(url):
+            attempted += 1
+            if process_yelp_listing(title, snippet, url, city):
                 saved += 1
             continue
 
