@@ -33,6 +33,8 @@ from config import (
     MAX_RESULTS_PER_QUERY,
     CRAWL_DELAY_SECONDS,
     STORE_CONTACT_RULE,
+    DIRECTORY_SITES,
+    DIRECTORY_SITES_PER_RUN,
     MAPS_SEARCH_ENABLED,
     MAPS_SEARCH_RESULTS,
 )
@@ -52,12 +54,13 @@ HEADERS = {
 # Domains that reliably block scrapers — skip immediately
 BLOCKED_DOMAINS = [
     "facebook.com", "instagram.com", "tiktok.com", "youtube.com", "youtu.be",
-    "yelp.com", "twitter.com", "linkedin.com", "reddit.com",
+    "twitter.com", "linkedin.com", "reddit.com",
     "narcity.com", "blogto.com", "bestbuy.ca", "canada.ca", "amazon.ca",
     "play.google.com", "support.google.com", "developers.google.com",
     "mapsplatform.google.com",
     "thatlocalgirl.com",
     "ileoja.ca",  # listicles / directory articles, not individual stores
+    "cbc.ca", "nih.gov", "ncbi.nlm.nih.gov",
 ]
 
 # Cities accepted when crawling a given TARGET_CITIES entry (GTA for Toronto, etc.)
@@ -132,52 +135,60 @@ def is_google_maps_place(url: str) -> bool:
 
 def search_for_city(category: str, city: str) -> list[dict]:
     """
-    Run Maps-biased search first, then a general query. Maps place URLs are
-    sorted to the front of the result list.
+    Directory site: searches first, then general web. Blocked URLs are removed
+    before the scrape loop so attempt slots are not wasted on junk.
     """
     city_name = city.split(",")[0].strip()
     province = city.split(",")[1].strip() if "," in city else ""
 
     merged: dict[str, dict] = {}
 
+    for site in DIRECTORY_SITES[:DIRECTORY_SITES_PER_RUN]:
+        directory_query = f"{category} {city_name} {site}".strip()
+        print(f"  📒 Directory search: {directory_query}")
+        for row in search(directory_query, num_results=5):
+            merged.setdefault(row["url"], row)
+
     if MAPS_SEARCH_ENABLED:
-        maps_queries = [
-            f"{category} {city_name} {province} site:google.com/maps",
-            f'"{category}" {city_name} {province} "google.com/maps/place"',
-        ]
-        for maps_query in maps_queries:
-            maps_query = maps_query.strip()
-            print(f"  🗺️  Maps search: {maps_query}")
-            for row in search(maps_query, num_results=MAPS_SEARCH_RESULTS):
-                merged[row["url"]] = row
+        maps_query = f"{category} {city_name} {province} site:google.com/maps".strip()
+        print(f"  🗺️  Maps search (legacy): {maps_query}")
+        for row in search(maps_query, num_results=MAPS_SEARCH_RESULTS):
+            merged.setdefault(row["url"], row)
 
     general_query = f'"{category}" {city_name} {province} Canada'.strip()
     print(f"  🔍 Web search: {general_query}")
     for row in search(general_query, num_results=8):
         merged.setdefault(row["url"], row)
 
+    results = [r for r in merged.values() if not is_blocked_url(r["url"])]
     results = [
-        r for r in merged.values()
+        r for r in results
         if not (
             "/maps/place/" in r["url"].lower()
             and not is_google_maps_place(r["url"])
         )
     ]
     results.sort(key=_result_sort_key)
-    maps_count = sum(1 for r in results if is_google_maps_place(r["url"]))
-    print(f"  Found {len(results)} URLs ({maps_count} Google Maps places)")
+    print(f"  Found {len(results)} scrapeable URLs")
     return results
 
 
+def _directory_domain_in_url(url: str) -> bool:
+    lower = url.lower()
+    return any(site.replace("site:", "") in lower for site in DIRECTORY_SITES)
+
+
 def _result_sort_key(row: dict) -> tuple[int, int]:
-    """Maps places first, then likely store sites, then everything else."""
+    """Yelp /biz/ and directory hits first, then African store domains."""
     url = row.get("url", "")
     title = row.get("title", "")
+    lower = url.lower()
     if is_google_maps_place(url):
         return (0, 0)
-    if is_blocked_url(url):
-        return (2, 0)
-    lower = url.lower()
+    if "/biz/" in lower and "yelp." in lower:
+        return (0, 1)
+    if _directory_domain_in_url(url):
+        return (0, 2)
     score = 1
     if "african" in lower or "african" in title.lower():
         score = 0
@@ -189,10 +200,14 @@ def _result_sort_key(row: dict) -> tuple[int, int]:
 # ── Step 2: Filter URLs ────────────────────────────────────────────────────────
 
 def is_blocked_url(url: str) -> bool:
-    """Block junk domains; allow Google Maps /place/ listings only."""
+    """Block junk domains; allow Yelp /biz/ pages and Google Maps /place/ listings."""
     lower = url.lower()
     if is_google_maps_place(url):
         return False
+    if "yelp." in lower:
+        if "/biz/" in lower:
+            return False
+        return True
     if "google.com" in lower or "google.ca" in lower or "maps.google." in lower:
         return True
     return any(domain in lower for domain in BLOCKED_DOMAINS)
@@ -453,9 +468,6 @@ def run_pipeline_for_city(city: str, category: str) -> int:
     attempted = 0
 
     for result in results:
-        if attempted >= MAX_RESULTS_PER_QUERY:
-            break
-
         url = result["url"]
         title = result["title"]
         snippet = result["snippet"]
@@ -467,13 +479,17 @@ def run_pipeline_for_city(city: str, category: str) -> int:
             print(f"  [skip] Blocked domain")
             continue
 
-        attempted += 1
+        if attempted >= MAX_RESULTS_PER_QUERY:
+            print(f"  [skip] Reached max scrape attempts ({MAX_RESULTS_PER_QUERY})")
+            break
 
         if is_google_maps_place(url):
+            attempted += 1
             if process_maps_place(title, snippet, url, city):
                 saved += 1
             continue
 
+        attempted += 1
         text = scrape(url)
         if text and extract_and_save(text, city, url):
             saved += 1

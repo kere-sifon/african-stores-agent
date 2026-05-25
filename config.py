@@ -41,18 +41,28 @@ TARGET_CITIES = [
 SEARCH_QUERIES = [
     "African grocery store",
     "African restaurant",
-    "African clothing store",
-    "African hair salon",
     "African food market",
     "West African store",
     "East African store",
+    "African hair salon",
+    "African clothing store",
 ]
 
-MAX_RESULTS_PER_QUERY = int(os.getenv("MAX_RESULTS_PER_QUERY", "8"))
+# DuckDuckGo site: operators for business directories (Maps via DDG is unreliable)
+DIRECTORY_SITES = [
+    "site:diasporastores.ca",
+    "site:yelp.ca",
+    "site:yellowpages.ca",
+    "site:411.ca",
+    "site:canadianorglist.com",
+]
+DIRECTORY_SITES_PER_RUN = int(os.getenv("DIRECTORY_SITES_PER_RUN", "2"))
+
+MAX_RESULTS_PER_QUERY = int(os.getenv("MAX_RESULTS_PER_QUERY", "5"))
 CRAWL_DELAY_SECONDS = 2
 
-# Prefer Google Maps place URLs in search (via DuckDuckGo site: filter)
-MAPS_SEARCH_ENABLED = os.getenv("MAPS_SEARCH_ENABLED", "true").lower() in (
+# Legacy — DuckDuckGo does not index Google Maps place URLs reliably
+MAPS_SEARCH_ENABLED = os.getenv("MAPS_SEARCH_ENABLED", "false").lower() in (
     "1",
     "true",
     "yes",
