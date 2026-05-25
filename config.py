@@ -48,7 +48,7 @@ SEARCH_QUERIES = [
     "East African store",
 ]
 
-MAX_RESULTS_PER_QUERY = 3
+MAX_RESULTS_PER_QUERY = int(os.getenv("MAX_RESULTS_PER_QUERY", "8"))
 CRAWL_DELAY_SECONDS = 2
 
 # Prefer Google Maps place URLs in search (via DuckDuckGo site: filter)

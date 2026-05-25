@@ -57,6 +57,7 @@ BLOCKED_DOMAINS = [
     "play.google.com", "support.google.com", "developers.google.com",
     "mapsplatform.google.com",
     "thatlocalgirl.com",
+    "ileoja.ca",  # listicles / directory articles, not individual stores
 ]
 
 # Cities accepted when crawling a given TARGET_CITIES entry (GTA for Toronto, etc.)
@@ -94,6 +95,12 @@ SPECIFIC_AFRICAN_REGIONS = (
     "west african", "east african", "south african", "central african",
     "nigerian", "ghanaian", "ethiopian", "somali", "senegalese", "kenyan",
     "congolese", "cameroonian", "caribbean",
+)
+
+STRONG_AFRICAN_DESC_PHRASES = (
+    "african groc", "african food", "african market", "african restaurant",
+    "african essentials", "authentic african", "west african", "east african",
+    "south african", "nigerian", "ghanaian", "ethiopian", "caribbean grocery",
 )
 
 # ── Step 1: Search ─────────────────────────────────────────────────────────────
@@ -134,10 +141,15 @@ def search_for_city(category: str, city: str) -> list[dict]:
     merged: dict[str, dict] = {}
 
     if MAPS_SEARCH_ENABLED:
-        maps_query = f"{category} {city_name} {province} site:google.com/maps".strip()
-        print(f"  🗺️  Maps search: {maps_query}")
-        for row in search(maps_query, num_results=MAPS_SEARCH_RESULTS):
-            merged[row["url"]] = row
+        maps_queries = [
+            f"{category} {city_name} {province} site:google.com/maps",
+            f'"{category}" {city_name} {province} "google.com/maps/place"',
+        ]
+        for maps_query in maps_queries:
+            maps_query = maps_query.strip()
+            print(f"  🗺️  Maps search: {maps_query}")
+            for row in search(maps_query, num_results=MAPS_SEARCH_RESULTS):
+                merged[row["url"]] = row
 
     general_query = f'"{category}" {city_name} {province} Canada'.strip()
     print(f"  🔍 Web search: {general_query}")
@@ -151,10 +163,27 @@ def search_for_city(category: str, city: str) -> list[dict]:
             and not is_google_maps_place(r["url"])
         )
     ]
-    results.sort(key=lambda r: (0 if is_google_maps_place(r["url"]) else 1))
+    results.sort(key=_result_sort_key)
     maps_count = sum(1 for r in results if is_google_maps_place(r["url"]))
     print(f"  Found {len(results)} URLs ({maps_count} Google Maps places)")
     return results
+
+
+def _result_sort_key(row: dict) -> tuple[int, int]:
+    """Maps places first, then likely store sites, then everything else."""
+    url = row.get("url", "")
+    title = row.get("title", "")
+    if is_google_maps_place(url):
+        return (0, 0)
+    if is_blocked_url(url):
+        return (2, 0)
+    lower = url.lower()
+    score = 1
+    if "african" in lower or "african" in title.lower():
+        score = 0
+    if any(p in lower for p in ("/blog/", "/thread/", "/documentation", "/collections/")):
+        score += 1
+    return (1, score)
 
 
 # ── Step 2: Filter URLs ────────────────────────────────────────────────────────
@@ -239,6 +268,26 @@ def process_maps_place(title: str, snippet: str, url: str, city_hint: str) -> bo
     return extract_and_save(text, city_hint, url)
 
 
+def infer_city_from_address(address: str, aliases: frozenset[str]) -> Optional[str]:
+    """Match a GTA (or search-area) city name embedded in a street address."""
+    addr = address.lower()
+    for alias in sorted(aliases, key=len, reverse=True):
+        if re.search(rf"\b{re.escape(alias)}\b", addr):
+            return alias.title()
+    return None
+
+
+def apply_address_city(store: StoreInfo, city_hint: str) -> None:
+    """Prefer the city parsed from a street address over marketing copy."""
+    key = city_hint.strip().lower()
+    aliases = CITY_SEARCH_ALIASES.get(key)
+    if not aliases or not store.address:
+        return
+    inferred = infer_city_from_address(store.address, aliases)
+    if inferred:
+        store.city = inferred
+
+
 def align_city_with_search(store: StoreInfo, city_hint: str) -> bool:
     """
     Keep listings tied to the city being crawled.
@@ -249,10 +298,15 @@ def align_city_with_search(store: StoreInfo, city_hint: str) -> bool:
     hint_city = city_hint.split(",")[0].strip()
     hint_lower = hint_city.lower()
 
+    apply_address_city(store, city_hint)
+
     if not aliases:
         return True
 
     store_city = (store.city or "").strip().lower()
+    has_address = bool(store.address and store.address.strip())
+    desc = (store.description or "").lower()
+
     if not store_city:
         store.city = hint_city
         return True
@@ -260,13 +314,25 @@ def align_city_with_search(store: StoreInfo, city_hint: str) -> bool:
     if store_city in aliases:
         return True
 
-    desc = (store.description or "").lower()
+    # Nationwide online grocer — no physical address in the search metro
+    if not has_address and (store.website or store.source_url):
+        if any(
+            term in desc
+            for term in ("online", "canada", "delivery", "ship", "nationwide")
+        ):
+            store.city = hint_city
+            print(f"  [save] Online retailer listed under {hint_city}")
+            return True
+
     if hint_lower in desc and (store.website or store.source_url):
         store.city = hint_city
         print(f"  [save] Listed under {hint_city} (serves area, based in {store_city.title()})")
         return True
 
-    print(f"  [save] City '{store.city}' outside {hint_city} area — skipped")
+    print(
+        f"  [save] City '{store.city}' outside {hint_city} area — skipped "
+        f"(physical address may be elsewhere)"
+    )
     return False
 
 
@@ -291,6 +357,10 @@ def is_relevant_african_store(store: StoreInfo) -> bool:
         prods = " ".join(store.products_and_specialties).lower()
         if any(signal in prods for signal in AFRICAN_SIGNALS):
             return True
+
+    desc = (store.description or "").lower()
+    if any(phrase in desc for phrase in STRONG_AFRICAN_DESC_PHRASES):
+        return True
 
     return False
 
@@ -319,6 +389,8 @@ def extract_and_save(text: str, city_hint: str, source_url: str) -> bool:
     if not store:
         print(f"  [extract] No store data extracted from {source_url}")
         return False
+
+    apply_address_city(store, city_hint)
 
     if not store.name or len(store.name) < 3:
         print(f"  [extract] Extracted name too short — skipping")

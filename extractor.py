@@ -30,6 +30,9 @@ Rules:
   Good: "iLeOja Online African Market"
 - If a field is not mentioned, omit it or use null
 - address: include a street address when present; do not invent one from a social media post alone
+- city: use the city from the street address when present (not marketing copy alone)
+- products_and_specialties: list up to 8 product names or food types visible on the page
+- For online-only retailers with no street address, set city to the search area ({city_hint})
 - Only extract a business that sells African groceries/food or is an African-focused shop
 - For Google Maps listings: parse address, phone, and hours from the snippet when shown
 - Do NOT extract major Canadian supermarket chains (Loblaws, Walmart, Metro, Sobeys, etc.)
