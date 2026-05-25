@@ -22,13 +22,9 @@ OLLAMA_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0"))
 
 # ── AWS Bedrock settings (when LLM_PROVIDER=bedrock) ─────────────────────────
 AWS_REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
+# Haiku 4.5 must be invoked via inference profile ID (not the foundation-model ID).
 BEDROCK_MODEL_ID = os.getenv(
     "BEDROCK_MODEL_ID",
-    "anthropic.claude-haiku-4-5-20251001-v1:0",
-)
-# Cross-region inference profile (optional — use if the base model ID fails)
-BEDROCK_MODEL_ID_REGIONAL = os.getenv(
-    "BEDROCK_MODEL_ID_REGIONAL",
     "us.anthropic.claude-haiku-4-5-20251001-v1:0",
 )
 BEDROCK_MAX_TOKENS = int(os.getenv("BEDROCK_MAX_TOKENS", "4096"))
@@ -52,18 +48,38 @@ SEARCH_QUERIES = [
     "East African store",
 ]
 
-MAX_RESULTS_PER_QUERY = 3
+MAX_RESULTS_PER_QUERY = int(os.getenv("MAX_RESULTS_PER_QUERY", "8"))
 CRAWL_DELAY_SECONDS = 2
 
+# Prefer Google Maps place URLs in search (via DuckDuckGo site: filter)
+MAPS_SEARCH_ENABLED = os.getenv("MAPS_SEARCH_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+MAPS_SEARCH_RESULTS = int(os.getenv("MAPS_SEARCH_RESULTS", "6"))
+
 # ── Storage ────────────────────────────────────────────────────────────────────
-DB_PATH = "african_stores.db"
-OUTPUT_DIR = "output"
+# sqlite = local file  |  mongodb = MongoDB Atlas (set MONGODB_URI)
+_db_default = "mongodb" if os.getenv("MONGODB_URI", "").strip() else "sqlite"
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", _db_default).strip().lower()
+
+DB_PATH = os.getenv("DB_PATH", "african_stores.db")
+OUTPUT_DIR = os.getenv("OUTPUT_DIR", "output")
+
+MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
+MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "african_stores")
+MONGODB_COLLECTION = os.getenv("MONGODB_COLLECTION", "stores")
+
+# Pipeline quality: "contact" = address OR phone OR store website | "address" = street only
+STORE_CONTACT_RULE = os.getenv("STORE_CONTACT_RULE", "contact").strip().lower()
+# Legacy alias — REQUIRE_ADDRESS=true forces strict street-address-only mode
+if os.getenv("REQUIRE_ADDRESS", "").lower() in ("1", "true", "yes"):
+    STORE_CONTACT_RULE = "address"
 
 
 def _active_bedrock_model_id() -> str:
-    """Prefer explicit BEDROCK_MODEL_ID; fall back to regional inference ID."""
-    if os.getenv("BEDROCK_USE_REGIONAL", "").lower() in ("1", "true", "yes"):
-        return BEDROCK_MODEL_ID_REGIONAL
+    """Return the Bedrock model or inference profile ID to pass to ChatBedrockConverse."""
     return BEDROCK_MODEL_ID
 
 

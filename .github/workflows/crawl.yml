@@ -1,14 +1,25 @@
 # Crawl African Stores Canada directory (Bedrock + pipeline)
 #
-# Required GitHub secrets (repo or org → Settings → Secrets and variables → Actions):
-#   AWS_ACCESS_KEY_ID
-#   AWS_SECRET_ACCESS_KEY
-#   AWS_SESSION_TOKEN          (optional — only if using temporary creds)
+# Auth: GitHub OIDC → AWS IAM role (no long-lived access keys in secrets)
 #
-# Optional repository variables (Settings → Secrets and variables → Variables):
-#   AWS_REGION                 (default: us-east-1)
-#   BEDROCK_MODEL_ID           (default: anthropic.claude-haiku-4-5-20251001-v1:0)
-#   BEDROCK_USE_REGIONAL       (set to "true" for us.anthropic... cross-region ID)
+# One-time AWS setup:
+#   1. IAM → Identity providers → Add provider (GitHub Actions OIDC)
+#      URL: https://token.actions.githubusercontent.com
+#      Audience: sts.amazonaws.com
+#   2. IAM → Roles → Create role → Web identity → that provider
+#      Trust: repo + branch in token.actions.githubusercontent.com:sub
+#      Permissions: bedrock:InvokeModel on foundation-model/* and inference-profile/*
+#      (cross-region profile us.anthropic... routes to us-east-2 etc. — use * region in IAM)
+#   3. Copy role ARN
+#
+# GitHub — Settings → Secrets and variables → Actions → Variables (required):
+#   AWS_ROLE_ARN = arn:aws:iam::ACCOUNT_ID:role/github-actions-african-stores
+# (Secret also works if you named it AWS_ROLE_ARN there instead.)
+#
+# Trust policy sub must match the branch you run from (e.g. repo:ORG/REPO:*).
+#
+# Required secret: MONGODB_URI (Atlas connection string)
+# Optional variables: AWS_REGION, BEDROCK_MODEL_ID, MONGODB_DB_NAME, MONGODB_COLLECTION
 
 name: Crawl directory
 
@@ -21,33 +32,31 @@ on:
         default: test
         type: choice
         options:
-          - test       # Toronto single-category pipeline + generate site
-          - full       # All cities/categories + generate (longer, more Bedrock cost)
-          - generate   # Regenerate HTML from existing DB only
-          - smoke      # Bedrock LLM + extractor smoke test (no crawl)
+          - test
+          - full
+          - generate
+          - smoke
       restore_db:
-        description: Restore african_stores.db from the last successful run
+        description: Restore prior workflow artifact (legacy SQLite/output only; not used for MongoDB)
         required: false
-        default: true
+        default: false
         type: boolean
 
   schedule:
-    # Weekly Toronto test crawl — Sunday 12:00 UTC (change or disable to control cost)
     - cron: "0 12 * * 0"
 
 concurrency:
   group: directory-crawl-${{ github.ref }}
   cancel-in-progress: false
 
-permissions:
-  contents: read
-  actions: read # required to restore artifacts from prior runs
-
 env:
   LLM_PROVIDER: bedrock
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-  BEDROCK_MODEL_ID: ${{ vars.BEDROCK_MODEL_ID || 'anthropic.claude-haiku-4-5-20251001-v1:0' }}
-  BEDROCK_USE_REGIONAL: ${{ vars.BEDROCK_USE_REGIONAL || '' }}
+  BEDROCK_MODEL_ID: ${{ vars.BEDROCK_MODEL_ID || 'us.anthropic.claude-haiku-4-5-20251001-v1:0' }}
+  STORAGE_BACKEND: mongodb
+  MONGODB_URI: ${{ secrets.MONGODB_URI }}
+  MONGODB_DB_NAME: ${{ vars.MONGODB_DB_NAME || 'african_stores' }}
+  MONGODB_COLLECTION: ${{ vars.MONGODB_COLLECTION || 'stores' }}
   PYTHONUNBUFFERED: "1"
 
 jobs:
@@ -55,6 +64,11 @@ jobs:
     name: ${{ github.event_name == 'schedule' && 'Scheduled test crawl' || format('Crawl ({0})', inputs.mode) }}
     runs-on: ubuntu-latest
     timeout-minutes: ${{ github.event_name == 'schedule' && 45 || (inputs.mode == 'full' && 180 || 45) }}
+
+    permissions:
+      id-token: write # required for OIDC — must be on the job, not only workflow root
+      contents: read
+      actions: read
 
     steps:
       - name: Checkout
@@ -70,12 +84,28 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Configure AWS credentials
+      - name: Validate AWS OIDC configuration
+        run: |
+          ROLE_ARN="${{ vars.AWS_ROLE_ARN }}"
+          if [ -z "$ROLE_ARN" ]; then
+            ROLE_ARN="${{ secrets.AWS_ROLE_ARN }}"
+          fi
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::AWS_ROLE_ARN is not set."
+            echo "Add repository Variable: Settings → Secrets and variables → Actions → Variables"
+            echo "  Name: AWS_ROLE_ARN"
+            echo "  Value: arn:aws:iam::ACCOUNT_ID:role/YOUR_ROLE_NAME"
+            exit 1
+          fi
+          echo "AWS_ROLE_ARN is set (${#ROLE_ARN} characters)"
+          echo "Workflow ref: ${{ github.ref }} (must match IAM trust policy sub condition)"
+          echo "Repository: ${{ github.repository }}"
+
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN || secrets.AWS_ROLE_ARN }}
+          role-session-name: gha-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Resolve crawl mode
@@ -83,7 +113,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
             echo "mode=test" >> "$GITHUB_OUTPUT"
-            echo "restore_db=true" >> "$GITHUB_OUTPUT"
+            echo "restore_db=false" >> "$GITHUB_OUTPUT"
           else
             echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
             echo "restore_db=${{ inputs.restore_db }}" >> "$GITHUB_OUTPUT"
@@ -108,16 +138,28 @@ jobs:
           python -c "
           from config import get_llm
           print(get_llm().invoke('Reply in one sentence that Bedrock is working.').content)
+          print('✅ Bedrock chat OK')
           "
-          python -c "
+          python <<'PY'
+          import sys
           from extractor import extract_store_info
+
           r = extract_store_info(
               'Mama Africa Grocery, 45 Eglinton Ave, Toronto ON. West African foods.',
               'Toronto, Ontario',
           )
-          assert r and r.name, r
-          print('Extractor OK:', r.name)
-          "
+          if r and r.name:
+              print('✅ Extractor OK:', r.name)
+              sys.exit(0)
+
+          print('::error::Extractor failed.')
+          print('If the log mentions \"use case details\", complete the Anthropic form in')
+          print('Bedrock console (us-east-1) → Model catalog → Claude Haiku 4.5 →')
+          print('Submit use case details. Wait ~15 minutes, then re-run smoke.')
+          print('If the log mentions \"Marketplace\", enable the model in Bedrock console')
+          print('(Model access) as account admin, or add aws-marketplace:Subscribe to the IAM role.')
+          sys.exit(1)
+          PY
 
       - name: Run pipeline (test)
         if: steps.mode.outputs.mode == 'test'
