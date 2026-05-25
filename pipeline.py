@@ -54,6 +54,9 @@ BLOCKED_DOMAINS = [
     "facebook.com", "instagram.com", "tiktok.com", "youtube.com", "youtu.be",
     "yelp.com", "twitter.com", "linkedin.com", "reddit.com",
     "narcity.com", "blogto.com", "bestbuy.ca", "canada.ca", "amazon.ca",
+    "play.google.com", "support.google.com", "developers.google.com",
+    "mapsplatform.google.com",
+    "thatlocalgirl.com",
 ]
 
 # Cities accepted when crawling a given TARGET_CITIES entry (GTA for Toronto, etc.)
@@ -86,6 +89,13 @@ AFRICAN_SIGNALS = (
     "jollof", "egusi", "plantain", "injera", "fufu", "suya", "mychopchop", "chopchop",
 )
 
+# region_focus values that indicate a real African grocery (not generic SEO)
+SPECIFIC_AFRICAN_REGIONS = (
+    "west african", "east african", "south african", "central african",
+    "nigerian", "ghanaian", "ethiopian", "somali", "senegalese", "kenyan",
+    "congolese", "cameroonian", "caribbean",
+)
+
 # ── Step 1: Search ─────────────────────────────────────────────────────────────
 
 def search(query: str, num_results: int = 8) -> list[dict]:
@@ -109,8 +119,8 @@ def search(query: str, num_results: int = 8) -> list[dict]:
 
 
 def is_google_maps_place(url: str) -> bool:
-    """True for Google Maps business listings (/maps/place/...)."""
-    return "/maps/place/" in url.lower()
+    """True for Google Maps business listings with a place name in the URL path."""
+    return parse_maps_place_name(url) is not None
 
 
 def search_for_city(category: str, city: str) -> list[dict]:
@@ -134,7 +144,13 @@ def search_for_city(category: str, city: str) -> list[dict]:
     for row in search(general_query, num_results=8):
         merged.setdefault(row["url"], row)
 
-    results = list(merged.values())
+    results = [
+        r for r in merged.values()
+        if not (
+            "/maps/place/" in r["url"].lower()
+            and not is_google_maps_place(r["url"])
+        )
+    ]
     results.sort(key=lambda r: (0 if is_google_maps_place(r["url"]) else 1))
     maps_count = sum(1 for r in results if is_google_maps_place(r["url"]))
     print(f"  Found {len(results)} URLs ({maps_count} Google Maps places)")
@@ -255,16 +271,28 @@ def align_city_with_search(store: StoreInfo, city_hint: str) -> bool:
 
 
 def is_relevant_african_store(store: StoreInfo) -> bool:
-    """Filter out major chains and pages with no African focus."""
+    """
+    Filter out major chains and pages with no African focus.
+    African keywords in description alone (SEO) are not enough — require
+    name, a specific region, or product signals.
+    """
     name_lower = (store.name or "").lower()
     if any(chain in name_lower for chain in EXCLUDED_MAJOR_CHAINS):
         return False
 
-    parts = [store.name or "", store.description or "", store.region_focus or ""]
+    if any(signal in name_lower for signal in AFRICAN_SIGNALS):
+        return True
+
+    region = (store.region_focus or "").lower()
+    if any(r in region for r in SPECIFIC_AFRICAN_REGIONS):
+        return True
+
     if store.products_and_specialties:
-        parts.extend(store.products_and_specialties)
-    blob = " ".join(parts).lower()
-    return any(signal in blob or signal in name_lower for signal in AFRICAN_SIGNALS)
+        prods = " ".join(store.products_and_specialties).lower()
+        if any(signal in prods for signal in AFRICAN_SIGNALS):
+            return True
+
+    return False
 
 
 def store_meets_quality(store: StoreInfo, source_url: str = "") -> bool:
