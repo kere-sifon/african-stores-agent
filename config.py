@@ -51,6 +51,14 @@ SEARCH_QUERIES = [
 MAX_RESULTS_PER_QUERY = 3
 CRAWL_DELAY_SECONDS = 2
 
+# Prefer Google Maps place URLs in search (via DuckDuckGo site: filter)
+MAPS_SEARCH_ENABLED = os.getenv("MAPS_SEARCH_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+MAPS_SEARCH_RESULTS = int(os.getenv("MAPS_SEARCH_RESULTS", "6"))
+
 # ── Storage ────────────────────────────────────────────────────────────────────
 # sqlite = local file  |  mongodb = MongoDB Atlas (set MONGODB_URI)
 _db_default = "mongodb" if os.getenv("MONGODB_URI", "").strip() else "sqlite"

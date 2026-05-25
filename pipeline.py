@@ -20,8 +20,8 @@
 
 import re
 import time
-import json
 from typing import Optional
+from urllib.parse import unquote
 
 from langchain_community.tools import DuckDuckGoSearchResults
 
@@ -33,6 +33,8 @@ from config import (
     MAX_RESULTS_PER_QUERY,
     CRAWL_DELAY_SECONDS,
     STORE_CONTACT_RULE,
+    MAPS_SEARCH_ENABLED,
+    MAPS_SEARCH_RESULTS,
 )
 from models import StoreInfo
 
@@ -50,10 +52,26 @@ HEADERS = {
 # Domains that reliably block scrapers — skip immediately
 BLOCKED_DOMAINS = [
     "facebook.com", "instagram.com", "tiktok.com", "youtube.com", "youtu.be",
-    "google.com", "google.ca", "yelp.com",
-    "twitter.com", "linkedin.com", "reddit.com",
-    "narcity.com", "blogto.com",
+    "yelp.com", "twitter.com", "linkedin.com", "reddit.com",
+    "narcity.com", "blogto.com", "bestbuy.ca", "canada.ca", "amazon.ca",
 ]
+
+# Cities accepted when crawling a given TARGET_CITIES entry (GTA for Toronto, etc.)
+CITY_SEARCH_ALIASES: dict[str, frozenset[str]] = {
+    "toronto, ontario": frozenset({
+        "toronto", "scarborough", "north york", "etobicoke", "mississauga",
+        "brampton", "markham", "thornhill", "vaughan", "richmond hill",
+        "ajax", "pickering", "oakville", "hamilton",
+    }),
+    "montreal, quebec": frozenset({
+        "montreal", "laval", "longueuil", "brossard", "terrebonne",
+    }),
+    "calgary, alberta": frozenset({"calgary", "airdrie"}),
+    "vancouver, british columbia": frozenset({
+        "vancouver", "burnaby", "surrey", "richmond", "new westminster",
+    }),
+    "ottawa, ontario": frozenset({"ottawa", "gatineau", "kanata", "nepean"}),
+}
 
 # Major chains — never directory entries for African store searches
 EXCLUDED_MAJOR_CHAINS = (
@@ -68,18 +86,20 @@ AFRICAN_SIGNALS = (
     "jollof", "egusi", "plantain", "injera", "fufu", "suya", "mychopchop", "chopchop",
 )
 
-_ddg = DuckDuckGoSearchResults(num_results=8, output_format="list")
-
-
 # ── Step 1: Search ─────────────────────────────────────────────────────────────
 
-def search(query: str) -> list[dict]:
+def search(query: str, num_results: int = 8) -> list[dict]:
     """Call DuckDuckGo and return list of {title, url, snippet}."""
     try:
         time.sleep(CRAWL_DELAY_SECONDS)
-        results = _ddg.invoke(query)
+        ddg = DuckDuckGoSearchResults(num_results=num_results, output_format="list")
+        results = ddg.invoke(query)
         return [
-            {"title": r.get("title", ""), "url": r.get("link", ""), "snippet": r.get("snippet", "")}
+            {
+                "title": r.get("title", ""),
+                "url": r.get("link", ""),
+                "snippet": r.get("snippet", ""),
+            }
             for r in results
             if r.get("link")
         ]
@@ -88,14 +108,53 @@ def search(query: str) -> list[dict]:
         return []
 
 
+def is_google_maps_place(url: str) -> bool:
+    """True for Google Maps business listings (/maps/place/...)."""
+    return "/maps/place/" in url.lower()
+
+
+def search_for_city(category: str, city: str) -> list[dict]:
+    """
+    Run Maps-biased search first, then a general query. Maps place URLs are
+    sorted to the front of the result list.
+    """
+    city_name = city.split(",")[0].strip()
+    province = city.split(",")[1].strip() if "," in city else ""
+
+    merged: dict[str, dict] = {}
+
+    if MAPS_SEARCH_ENABLED:
+        maps_query = f"{category} {city_name} {province} site:google.com/maps".strip()
+        print(f"  🗺️  Maps search: {maps_query}")
+        for row in search(maps_query, num_results=MAPS_SEARCH_RESULTS):
+            merged[row["url"]] = row
+
+    general_query = f'"{category}" {city_name} {province} Canada'.strip()
+    print(f"  🔍 Web search: {general_query}")
+    for row in search(general_query, num_results=8):
+        merged.setdefault(row["url"], row)
+
+    results = list(merged.values())
+    results.sort(key=lambda r: (0 if is_google_maps_place(r["url"]) else 1))
+    maps_count = sum(1 for r in results if is_google_maps_place(r["url"]))
+    print(f"  Found {len(results)} URLs ({maps_count} Google Maps places)")
+    return results
+
+
 # ── Step 2: Filter URLs ────────────────────────────────────────────────────────
 
+def is_blocked_url(url: str) -> bool:
+    """Block junk domains; allow Google Maps /place/ listings only."""
+    lower = url.lower()
+    if is_google_maps_place(url):
+        return False
+    if "google.com" in lower or "google.ca" in lower or "maps.google." in lower:
+        return True
+    return any(domain in lower for domain in BLOCKED_DOMAINS)
+
+
 def is_scrapeable(url: str) -> bool:
-    """Return False for domains that block scrapers or aren't store pages."""
-    for domain in BLOCKED_DOMAINS:
-        if domain in url:
-            return False
-    return True
+    return not is_blocked_url(url)
 
 
 # ── Step 3: Scrape ─────────────────────────────────────────────────────────────
@@ -126,9 +185,73 @@ def scrape(url: str, max_chars: int = 4000) -> Optional[str]:
 # ── Step 4 + 5: Extract and save ───────────────────────────────────────────────
 
 def _is_store_website(url: str) -> bool:
-    if not url or not url.strip():
+    if not url or not url.strip() or is_google_maps_place(url):
         return False
-    return not any(domain in url for domain in BLOCKED_DOMAINS)
+    return not is_blocked_url(url)
+
+
+def parse_maps_place_name(url: str) -> Optional[str]:
+    """Business name from /maps/place/Name+Here/... path segment."""
+    match = re.search(r"/maps/place/([^/@?]+)", url)
+    if not match:
+        return None
+    name = unquote(match.group(1).replace("+", " "))
+    return name.strip() if name else None
+
+
+def build_maps_extraction_text(title: str, snippet: str, url: str, city_hint: str) -> str:
+    """Build text for the extractor from Maps search metadata (page scrape usually fails)."""
+    place_name = parse_maps_place_name(url)
+    parts = [
+        "Source: Google Maps business listing.",
+        f"Search area: {city_hint}.",
+        f"Listing title: {title}.",
+        f"Maps snippet: {snippet}.",
+    ]
+    if place_name:
+        parts.append(f"Place name from URL: {place_name}.")
+    parts.append(
+        "Extract the store's street address, phone, and hours from the snippet when present."
+    )
+    return " ".join(parts)
+
+
+def process_maps_place(title: str, snippet: str, url: str, city_hint: str) -> bool:
+    """Extract store info from Maps listing metadata without scraping the Maps page."""
+    print("  [maps] Using Google Maps listing (snippet + place URL)")
+    text = build_maps_extraction_text(title, snippet, url, city_hint)
+    return extract_and_save(text, city_hint, url)
+
+
+def align_city_with_search(store: StoreInfo, city_hint: str) -> bool:
+    """
+    Keep listings tied to the city being crawled.
+    Online retailers based elsewhere may use the search city if they serve that area.
+    """
+    key = city_hint.strip().lower()
+    aliases = CITY_SEARCH_ALIASES.get(key)
+    hint_city = city_hint.split(",")[0].strip()
+    hint_lower = hint_city.lower()
+
+    if not aliases:
+        return True
+
+    store_city = (store.city or "").strip().lower()
+    if not store_city:
+        store.city = hint_city
+        return True
+
+    if store_city in aliases:
+        return True
+
+    desc = (store.description or "").lower()
+    if hint_lower in desc and (store.website or store.source_url):
+        store.city = hint_city
+        print(f"  [save] Listed under {hint_city} (serves area, based in {store_city.title()})")
+        return True
+
+    print(f"  [save] City '{store.city}' outside {hint_city} area — skipped")
+    return False
 
 
 def is_relevant_african_store(store: StoreInfo) -> bool:
@@ -180,6 +303,9 @@ def extract_and_save(text: str, city_hint: str, source_url: str) -> bool:
     if _is_store_website(source_url) and not store.website:
         store.website = source_url
 
+    if not align_city_with_search(store, city_hint):
+        return False
+
     if store_exists(store.name, store.city):
         print(f"  [save] Already exists: {store.name} ({store.city}) — skipped")
         return False
@@ -216,9 +342,8 @@ def run_pipeline_for_city(city: str, category: str) -> int:
     Full pipeline for one city + category combination.
     Returns the number of stores saved.
     """
-    query = f"{category} {city} Canada"
-    print(f"\n  🔍 Searching: {query}")
-    results = search(query)
+    print(f"\n  Searching in: {city}")
+    results = search_for_city(category, city)
 
     if not results:
         print(f"  No search results returned.")
@@ -238,18 +363,22 @@ def run_pipeline_for_city(city: str, category: str) -> int:
         print(f"\n  → {title[:60]}")
         print(f"    {url[:80]}")
 
-        if not is_scrapeable(url):
-            print(f"  [skip] Blocked domain — not saving from snippet")
+        if is_blocked_url(url):
+            print(f"  [skip] Blocked domain")
             continue
 
         attempted += 1
-        text = scrape(url)
 
-        if text:
-            if extract_and_save(text, city, url):
+        if is_google_maps_place(url):
+            if process_maps_place(title, snippet, url, city):
                 saved += 1
+            continue
+
+        text = scrape(url)
+        if text and extract_and_save(text, city, url):
+            saved += 1
         else:
-            print(f"  [skip] Scrape failed — no snippet fallback (low quality)")
+            print(f"  [skip] Scrape failed or no usable content")
 
     return saved
 

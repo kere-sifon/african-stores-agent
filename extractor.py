@@ -31,6 +31,7 @@ Rules:
 - If a field is not mentioned, omit it or use null
 - address: include a street address when present; do not invent one from a social media post alone
 - Only extract a business that sells African groceries/food or is an African-focused shop
+- For Google Maps listings: parse address, phone, and hours from the snippet when shown
 - Do NOT extract major Canadian supermarket chains (Loblaws, Walmart, Metro, Sobeys, etc.)
 - Do NOT extract businesses from news articles, vlogs, or listicles about generic grocery shopping
 - Write the description in an engaging, informative tone suitable for a directory
