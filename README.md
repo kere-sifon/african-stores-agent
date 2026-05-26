@@ -1,49 +1,40 @@
-# African Stores Canada — AI Agent Directory Builder
+# African Stores Canada — Store Directory Builder
 
-An **agentic AI pipeline** that crawls the web to find and catalogue African
-stores across Canada, then generates a static HTML directory site.
+An AI-assisted crawler that finds and catalogues African-focused stores across
+Canada, then generates a static HTML directory site.
 
-Built with **LangChain + Ollama** — designed as a learning project to understand
-how LangChain agents, tools, chains, and structured output fit together.
+Built with **LangChain** and a **deterministic pipeline** (plus an optional
+LangGraph agent mode). Supports **Ollama** (local) and **AWS Bedrock** (hosted).
 
 ---
 
 ## Architecture
 
 ```
-                    ┌─────────────────────────────────────────┐
-                    │              AgentExecutor               │
-                    │  (LangChain ReAct loop)                  │
-                    │                                          │
-                    │  Thought → Action → Observation → ...    │
-                    └────────────────┬────────────────────────┘
-                                     │ calls
-              ┌──────────────────────┼──────────────────────┐
-              ▼                      ▼                       ▼
-   ┌─────────────────┐   ┌────────────────────┐  ┌──────────────────┐
-   │ search_for_     │   │   scrape_page       │  │ save_store_to_db │
-   │ stores (tool)   │   │   (tool)            │  │ (tool)           │
-   │                 │   │                     │  │                  │
-   │ DuckDuckGo      │   │ requests +          │  │ SQLite via       │
-   │ search          │   │ BeautifulSoup       │  │ storage.py       │
-   └─────────────────┘   └────────────────────┘  └──────────────────┘
-                                     │
-                                     ▼
-                          ┌─────────────────────┐
-                          │  extractor.py chain  │
-                          │                      │
-                          │  ChatOllama (local)  │
-                          │  + JsonOutputParser  │
-                          │  → StoreInfo model   │
-                          └─────────────────────┘
-                                     │
-                                     ▼
-                          ┌─────────────────────┐
-                          │  generator.py        │
-                          │                      │
-                          │  SQLite → Jinja2     │
-                          │  → Static HTML site  │
-                          └─────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│                         pipeline.py                             │
+│            (deterministic: search → scrape → extract)            │
+└───────────────────────────────────┬────────────────────────────┘
+                                    │
+                                    ▼
+                         ┌─────────────────────┐
+                         │  extractor.py chain  │
+                         │  prompt | llm | json │
+                         │  → StoreInfo model   │
+                         └─────────────────────┘
+                                    │
+                                    ▼
+                         ┌─────────────────────┐
+                         │ storage.py facade    │
+                         │ MongoDB (default)    │
+                         │ or SQLite fallback   │
+                         └─────────────────────┘
+                                    │
+                                    ▼
+                         ┌─────────────────────┐
+                         │  generator.py        │
+                         │  DB → Static HTML    │
+                         └─────────────────────┘
 ```
 
 ---
@@ -52,12 +43,10 @@ how LangChain agents, tools, chains, and structured output fit together.
 
 | File | Concept | What you learn |
 |---|---|---|
-| `agent.py` | `create_react_agent` + `AgentExecutor` | How the ReAct loop works: Thought/Action/Observation |
-| `tools.py` | `@tool` decorator | How to give the agent hands — every tool is just a Python function |
 | `extractor.py` | LCEL chain (`prompt \| llm \| parser`) | How chains compose with the pipe operator |
 | `extractor.py` | `JsonOutputParser` + Pydantic | How to get structured data out of an LLM |
-| `agent.py` | `PromptTemplate` | How to craft a ReAct system prompt |
 | `models.py` | `BaseModel` / `Field` | How Pydantic shapes LLM output |
+| `agent.py` (optional) | LangGraph agent | A more flexible (but less deterministic) crawl mode |
 
 ---
 
@@ -72,7 +61,16 @@ source .venv/bin/activate      # macOS / Linux
 pip install -r requirements.txt
 ```
 
-### 2. Ollama model
+### 2. Configure environment
+
+Copy `.env.example` to `.env` and set what you need.
+
+- **MongoDB Atlas (recommended)**: set `MONGODB_URI` (storage defaults to Mongo when present)
+- **LLM**:
+  - Local: `LLM_PROVIDER=ollama`
+  - Hosted: `LLM_PROVIDER=bedrock` plus `AWS_REGION` / `BEDROCK_MODEL_ID`
+
+### 3. Ollama (optional, for local runs)
 
 ```bash
 # Pull the recommended model if you don't have it
@@ -87,7 +85,7 @@ ollama list
 > - `mistral:7b` — slightly better at following JSON schemas
 > - Avoid `qwen2.5-coder:14b` here — it's optimised for code, not text extraction
 
-### 3. Edit config.py (optional)
+### 4. Edit config (optional)
 
 ```python
 # config.py
@@ -106,21 +104,7 @@ MAX_RESULTS_PER_QUERY = 2             # Lower = faster, less data
 python run.py
 ```
 
-Watch the ReAct trace in your terminal. You'll see:
-
-```
-Thought: I should search for African grocery stores in Toronto...
-Action: search_for_stores
-Action Input: African grocery store Toronto Canada
-Observation: TITLE: ...
-             URL: https://...
-             SNIPPET: ...
-
-Thought: I found some results. Let me scrape the first URL...
-Action: scrape_page
-Action Input: https://...
-...
-```
+This runs a single city/category crawl using the **pipeline**.
 
 ### Step 2 — Full crawl
 
@@ -128,8 +112,7 @@ Action Input: https://...
 python run.py --full
 ```
 
-This runs all city × category combinations. With `MAX_RESULTS_PER_QUERY=3`
-and 5 cities × 7 categories, expect ~105 agent tasks. Budget ~30-60 min.
+This runs all city × category combinations, then generates the site.
 
 ### Step 3 — Generate the HTML site
 
@@ -145,6 +128,15 @@ Then open `output/index.html` in your browser.
 python run.py --stats
 ```
 
+### Optional — LangGraph agent mode
+
+If you want the more flexible agent-driven approach (useful for experimentation):
+
+```bash
+python run.py --agent
+python run.py --agent-full
+```
+
 ---
 
 ## Project Structure
@@ -153,10 +145,12 @@ python run.py --stats
 african-stores-agent/
 ├── config.py         ← All settings in one place
 ├── models.py         ← Pydantic data model (StoreInfo)
-├── storage.py        ← SQLite read/write
-├── tools.py          ← LangChain @tool functions (agent's hands)
+├── storage.py        ← Storage facade (MongoDB + SQLite)
+├── storage_mongo.py  ← MongoDB Atlas backend
+├── storage_sqlite.py ← SQLite backend (fallback)
 ├── extractor.py      ← LangChain LCEL chain (structured extraction)
-├── agent.py          ← ReAct agent setup + run loop
+├── pipeline.py       ← Deterministic crawl pipeline (default)
+├── agent.py          ← LangGraph agent (optional)
 ├── generator.py      ← Static HTML site generator
 ├── run.py            ← CLI entry point
 ├── requirements.txt
@@ -187,5 +181,5 @@ african-stores-agent/
 | `Connection refused` on Ollama | Run `ollama serve` first |
 | LLM outputs invalid JSON | Switch model or lower `OLLAMA_TEMPERATURE` |
 | DuckDuckGo rate limits | Increase `CRAWL_DELAY_SECONDS` in config.py |
-| Agent loops forever | Lower `max_iterations` in agent.py |
-| Empty database after run | Check `verbose=True` output for tool errors |
+| Saved 0 stores | Increase `MAX_RESULTS_PER_QUERY` or add more directory sites |
+| Empty DB in CI | Ensure `MONGODB_URI` secret is set (and Atlas IP access allows GitHub runners) |
