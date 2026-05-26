@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 class StoreInfo(BaseModel):
     """
     Structured representation of an African store in Canada.
-    
+
     When you pass this to LangChain's structured output chain, the LLM will
     fill in each field from raw scraped text. Pydantic validates the result.
     """
@@ -47,11 +47,15 @@ class StoreInfo(BaseModel):
         default=None, description="Opening hours as a plain string"
     )
 
-    description: str = Field(
+    # FIX: description was `str` (required) but the LLM sometimes returns null,
+    # causing a Pydantic ValidationError and dropping otherwise valid records.
+    # Made Optional with a safe default so extraction never fails on this field.
+    description: Optional[str] = Field(
+        default="An African store serving the local community.",
         description=(
             "A 2-3 sentence description of the store, its products, and its "
             "community significance. Write in an engaging, informative tone."
-        )
+        ),
     )
 
     products_and_specialties: Optional[List[str]] = Field(

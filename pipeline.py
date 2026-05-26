@@ -15,7 +15,7 @@
 #   2. Parses URLs from results
 #   3. Scrapes each URL (skips 4xx errors automatically)
 #   4. Sends scraped text to the LangChain extraction CHAIN in extractor.py
-#   5. Saves valid results to SQLite
+#   5. Saves valid results to the configured database (SQLite or MongoDB)
 # ─────────────────────────────────────────────────────────────────────────────
 
 import re

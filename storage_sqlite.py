@@ -45,7 +45,11 @@ def init_db() -> None:
 def save_store(store: StoreInfo) -> tuple[bool, str]:
     try:
         with get_connection() as conn:
-            conn.execute(
+            # FIX: use cursor.rowcount to distinguish a real insert from a
+            # silently-ignored duplicate. INSERT OR IGNORE always "succeeds"
+            # (no exception) even when the UNIQUE constraint fires and nothing
+            # is written — rowcount == 0 in that case.
+            cursor = conn.execute(
                 """
                 INSERT OR IGNORE INTO stores (
                     name, category, region_focus, address, city, province,
@@ -71,6 +75,9 @@ def save_store(store: StoreInfo) -> tuple[bool, str]:
                 ),
             )
             conn.commit()
+
+        if cursor.rowcount == 0:
+            return True, f"Already in database: {store.name} ({store.city})"
         return True, f"Saved: {store.name} ({store.city})"
     except Exception as e:
         return False, f"DB error: {e}"

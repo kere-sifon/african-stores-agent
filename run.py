@@ -4,7 +4,8 @@
 # Usage:
 #   python run.py                   single city test (pipeline)
 #   python run.py --full            full crawl (pipeline)
-#   python run.py --agent           single city test (ReAct agent — for learning)
+#   python run.py --agent           single city test (LangGraph agent)
+#   python run.py --agent-full      full crawl (LangGraph agent)
 #   python run.py --generate        build HTML site from DB
 #   python run.py --stats           print DB summary
 
@@ -24,14 +25,24 @@ def run_full():
 
 
 def run_agent_test():
-    """Keep the agent available for learning/experimentation."""
+    """LangGraph agent — single city test (Toronto, African grocery store)."""
     from agent import build_agent, run_agent_for_city
+    from config import llm_config_summary
+
     init_db()
-    executor = build_agent()
-    print("🤖 Agent test: African grocery stores in Toronto\n")
-    result = run_agent_for_city(executor, "Toronto, Ontario", "African grocery store")
-    print("\n── Agent final answer ──")
-    print(result.get("output", ""))
+    print(f"🤖 LangGraph agent test: African grocery stores in Toronto")
+    print(f"   LLM: {llm_config_summary()}\n")
+
+    app = build_agent()
+    run_agent_for_city(app, "Toronto, Ontario", "African grocery store")
+    print_stats()
+
+
+def run_agent_full():
+    """LangGraph agent — full crawl across all cities and categories."""
+    from agent import run_full_crawl
+    run_full_crawl()
+    generate()
 
 
 def generate():
@@ -57,6 +68,8 @@ if __name__ == "__main__":
 
     if "--full" in args:
         run_full()
+    elif "--agent-full" in args:
+        run_agent_full()
     elif "--agent" in args:
         run_agent_test()
     elif "--generate" in args:

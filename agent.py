@@ -1,112 +1,223 @@
 # agent.py
-from langchain_classic.agents import create_react_agent, AgentExecutor
-from langchain_core.prompts import PromptTemplate
+# ─────────────────────────────────────────────────────────────────────────────
+# LangGraph agent — production-grade replacement for the ReAct AgentExecutor.
+#
+# WHY LANGGRAPH OVER REACT AGENTEXECUTOR?
+#   The old agent used langchain_classic's AgentExecutor which parses
+#   Thought/Action/Observation from raw LLM text. Small models break this
+#   format constantly. LangGraph uses native tool calling instead — the LLM
+#   outputs structured JSON ({"name": "scrape_page", "args": {...}}) which
+#   Claude Haiku on Bedrock handles reliably.
+#
+# KEY CONCEPTS:
+#   StateGraph   — a directed graph where each node transforms agent state
+#   AgentState   — explicit typed dict holding the full conversation + metadata
+#   ToolNode     — a built-in LangGraph node that executes tool calls from state
+#   Checkpointer — persists state to MongoDB so runs survive crashes/restarts
+#   bind_tools() — attaches tool schemas to the LLM so it knows what's available
+#
+# FLOW:
+#   START → agent_node → (tool_calls?) → tools_node → agent_node → ... → END
+#   The LLM decides when it's done by outputting a message with no tool calls.
+# ─────────────────────────────────────────────────────────────────────────────
 
-from tools import get_all_tools
-from storage import init_db
+from __future__ import annotations
+
+import operator
+from typing import Annotated, TypedDict
+
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langgraph.graph import END, StateGraph
+from langgraph.prebuilt import ToolNode
+
 from config import (
+    MAX_RESULTS_PER_QUERY,
+    MONGODB_URI,
+    SEARCH_QUERIES,
+    TARGET_CITIES,
     get_llm,
     llm_config_summary,
-    TARGET_CITIES,
-    SEARCH_QUERIES,
-    MAX_RESULTS_PER_QUERY,
 )
-
-REACT_PROMPT = PromptTemplate.from_template(
-    """You are a research agent that finds African stores in Canada and saves them to a database.
-
-You have access to the following tools:
-{tools}
-
-STRICT OUTPUT FORMAT — follow this exactly, no markdown, no bold, no code blocks:
-
-Thought: your reasoning about what to do next
-Action: one of [{tool_names}]
-Action Input: plain text input with no quotes or formatting
-Observation: (this is filled in automatically — do not write it yourself)
-
-... repeat Thought/Action/Action Input as needed ...
-
-Thought: I have finished the task.
-Final Answer: brief summary of what was saved
-
-EXAMPLE (study this format carefully):
-
-Thought: I need to search for African grocery stores in Toronto.
-Action: search_for_stores
-Action Input: African grocery store Toronto Ontario Canada
-Observation: TITLE: Adonai African Grocery
-URL: https://example.com/adonai
-SNIPPET: Adonai African Grocery, 4164 Kingston Rd, Scarborough ON. West African foods.
----
-
-Thought: I found a store. Let me scrape the page for more details.
-Action: scrape_page
-Action Input: https://example.com/adonai
-Observation: Adonai African Grocery Store located at 4164 Kingston Rd Scarborough ON M1E 2M4. Phone 416-555-0100. Open daily. Sells Nigerian and Ghanaian groceries.
-
-Thought: I have enough details to save this store.
-Action: save_store_to_db
-Action Input: {{"name": "Adonai African Grocery", "category": "Grocery", "region_focus": "West African", "address": "4164 Kingston Rd", "city": "Scarborough", "province": "Ontario", "postal_code": "M1E 2M4", "phone": "416-555-0100", "description": "A West African grocery store in Scarborough carrying Nigerian and Ghanaian staples.", "source_url": "https://example.com/adonai"}}
-Observation: Saved: Adonai African Grocery (Scarborough)
-
-Thought: I have finished saving the store.
-Final Answer: Saved 1 store: Adonai African Grocery in Scarborough.
-
-RULES:
-1. Action Input is ALWAYS plain text — never use quotes around it, never write code
-2. If scrape_page returns a 403 or 400 error, skip that URL and try the NEXT one
-3. If ALL scrape attempts fail, save the store using information from the search snippet alone
-4. Never call search_for_stores more than twice — use what you already found
-5. Save JSON must use double quotes, no trailing commas
-
-Begin!
-
-Task: {input}
-
-{agent_scratchpad}"""
-)
+from storage import init_db, get_stats
+from tools import get_all_tools
 
 
-def build_agent() -> AgentExecutor:
+# ── Agent state ────────────────────────────────────────────────────────────────
+# State is the single source of truth passed between every node in the graph.
+# Annotated[list, operator.add] means new messages are appended, not replaced.
+
+class AgentState(TypedDict):
+    messages: Annotated[list[BaseMessage], operator.add]
+    city: str
+    category: str
+    stores_saved: int
+
+
+# ── System prompt ──────────────────────────────────────────────────────────────
+# With tool calling, we don't need the rigid Thought/Action/Observation format.
+# The model decides what to call natively — the prompt focuses on intent.
+
+SYSTEM_PROMPT = """You are a research agent that finds African stores in Canada \
+and saves them to a directory database.
+
+Your job for each task:
+1. Search for stores using search_for_stores
+2. Scrape promising URLs using scrape_page (skip 403/400 errors, try the next URL)
+3. Save each real African store using save_store_to_db
+4. Check check_store_exists before saving to avoid duplicates
+5. Stop when you have saved the top results or exhausted the search
+
+Rules:
+- Save stores that have a physical address, phone number, OR a store website
+- Skip social media pages, news articles, blog posts, and major chains
+- If scraping fails for all URLs, save using snippet text from the search results
+- Call get_database_stats once at the start to see what is already saved
+- Do not search more than twice for the same task"""
+
+
+# ── Graph nodes ────────────────────────────────────────────────────────────────
+
+def agent_node(state: AgentState) -> dict:
+    """
+    The reasoning node. LLM reads the current state and decides:
+      - Call a tool (returns a message with tool_calls populated)
+      - Finish (returns a plain message with no tool_calls)
+    """
     llm = get_llm()
-    print(f"[agent] LLM: {llm_config_summary()}")
-
     tools = get_all_tools()
-    agent = create_react_agent(llm=llm, tools=tools, prompt=REACT_PROMPT)
 
-    executor = AgentExecutor(
-        agent=agent,
-        tools=tools,
-        verbose=True,
-        max_iterations=25,
-        handle_parsing_errors=(
-            "Output format error. You MUST use exactly:\n"
-            "Thought: ...\nAction: ...\nAction Input: ...\n"
-            "No markdown, no bold, no code blocks."
-        ),
-        return_intermediate_steps=True,
-    )
-    return executor
+    # bind_tools attaches tool schemas to the LLM request so it knows
+    # what tools exist and what arguments each one expects.
+    llm_with_tools = llm.bind_tools(tools)
+
+    response = llm_with_tools.invoke(state["messages"])
+    return {"messages": [response]}
 
 
-def run_agent_for_city(executor: AgentExecutor, city: str, category: str) -> dict:
+def should_continue(state: AgentState) -> str:
+    """
+    Routing function — inspects the last message to decide next node.
+    If the LLM made tool calls → route to 'tools' node.
+    If no tool calls → the agent is done → route to END.
+    """
+    last_message = state["messages"][-1]
+    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        return "tools"
+    return END
+
+
+# ── Graph construction ─────────────────────────────────────────────────────────
+
+def build_graph():
+    """
+    Construct the LangGraph StateGraph.
+
+    Nodes:
+      agent — LLM reasoning (decides what to do next)
+      tools — executes the tool calls the LLM requested
+
+    Edges:
+      START → agent
+      agent → tools (when LLM made tool calls)
+      agent → END   (when LLM is done)
+      tools → agent (always loop back after tool execution)
+    """
+    tools = get_all_tools()
+
+    # ToolNode is a built-in LangGraph node that:
+    #   1. Reads tool_calls from the last message in state
+    #   2. Executes each tool with its arguments
+    #   3. Appends ToolMessage results back to state
+    tool_node = ToolNode(tools)
+
+    graph = StateGraph(AgentState)
+    graph.add_node("agent", agent_node)
+    graph.add_node("tools", tool_node)
+
+    graph.set_entry_point("agent")
+    graph.add_conditional_edges("agent", should_continue)
+    graph.add_edge("tools", "agent")
+
+    return graph
+
+
+def build_agent(use_checkpointing: bool = True):
+    """
+    Compile the graph into a runnable app.
+
+    Checkpointing (MongoDB):
+      When MONGODB_URI is set, agent state is persisted after every node.
+      If the run crashes, the next invocation with the same thread_id resumes
+      from where it stopped rather than starting over.
+    """
+    graph = build_graph()
+
+    checkpointer = None
+    if use_checkpointing and MONGODB_URI:
+        try:
+            from langgraph.checkpoint.mongodb import MongoDBSaver
+            checkpointer = MongoDBSaver.from_conn_string(MONGODB_URI)
+            print("[agent] Checkpointing enabled (MongoDB)")
+        except ImportError:
+            print("[agent] langgraph-checkpoint-mongodb not installed — no checkpointing")
+        except Exception as e:
+            print(f"[agent] Checkpointer init failed ({e}) — running without checkpointing")
+
+    return graph.compile(checkpointer=checkpointer)
+
+
+# ── Run helpers ────────────────────────────────────────────────────────────────
+
+def run_agent_for_city(app, city: str, category: str) -> dict:
+    """
+    Run one agent task: find stores of a given category in a given city.
+
+    thread_id gives each run a unique checkpointing key so state is isolated
+    between city+category combinations.
+    """
+    import uuid
+    thread_id = f"{city}-{category}-{uuid.uuid4().hex[:8]}"
+
     task = (
         f"Find {category}s in {city}, Canada. "
-        f"Search once, scrape up to {MAX_RESULTS_PER_QUERY} result URLs, "
-        f"extract store details, and save each valid store to the database. "
-        f"If a page returns a 403 or 400 error, skip it and try the next URL. "
-        f"If scraping fails entirely, save using snippet text only."
+        f"Search once, scrape up to {MAX_RESULTS_PER_QUERY} URLs, "
+        f"extract store details, and save each valid African store to the database. "
+        f"Skip stores already in the database."
     )
+
     print(f"\n{'='*60}")
     print(f"TASK: {task}")
     print(f"{'='*60}\n")
-    return executor.invoke({"input": task})
+
+    initial_state: AgentState = {
+        "messages": [
+            SystemMessage(content=SYSTEM_PROMPT),
+            HumanMessage(content=task),
+        ],
+        "city": city,
+        "category": category,
+        "stores_saved": 0,
+    }
+
+    config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 50}
+
+    result = app.invoke(initial_state, config=config)
+
+    # Print the final message from the agent
+    final_messages = result.get("messages", [])
+    if final_messages:
+        last = final_messages[-1]
+        if hasattr(last, "content") and last.content:
+            print(f"\n── Agent summary ──\n{last.content}")
+
+    return result
 
 
 def run_full_crawl():
+    """Full crawl across all cities and categories using the LangGraph agent."""
     init_db()
-    executor = build_agent()
+    print(f"[agent] LLM: {llm_config_summary()}")
+    app = build_agent()
 
     total_tasks = len(TARGET_CITIES) * len(SEARCH_QUERIES)
     completed = 0
@@ -116,13 +227,11 @@ def run_full_crawl():
             completed += 1
             print(f"\n[{completed}/{total_tasks}] City: {city} | Category: {query}")
             try:
-                run_agent_for_city(executor, city, query)
+                run_agent_for_city(app, city, query)
             except Exception as e:
                 print(f"  [agent] Error on ({city}, {query}): {e} — continuing...")
-                continue
 
-    print("\n✅ Crawl complete.")
-    from storage import get_stats
+    print("\n✅ Agent crawl complete.")
     stats = get_stats()
     print(f"   Total stores collected: {stats['total']}")
 

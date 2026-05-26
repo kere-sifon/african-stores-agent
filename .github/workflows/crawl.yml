@@ -34,6 +34,8 @@ on:
         options:
           - test
           - full
+          - agent
+          - agent-full
           - generate
           - smoke
       restore_db:
@@ -174,10 +176,32 @@ jobs:
           python run.py --full
           python run.py --stats
 
+      - name: Run LangGraph agent (single city test)
+        if: steps.mode.outputs.mode == 'agent'
+        run: |
+          python run.py --agent
+          python run.py --generate
+          python run.py --stats
+
+      - name: Run LangGraph agent (full crawl)
+        if: steps.mode.outputs.mode == 'agent-full'
+        run: |
+          python run.py --agent-full
+          python run.py --stats
+
       - name: Generate site only
         if: steps.mode.outputs.mode == 'generate'
         run: |
-          test -f african_stores.db || (echo "No african_stores.db — enable restore_db or run test/full first" && exit 1)
+          # FIX: check the active storage backend (MongoDB in CI), not SQLite.
+          # The old check `test -f african_stores.db` always passed vacuously
+          # when STORAGE_BACKEND=mongodb, generating an empty site silently.
+          python -c "
+          from storage import init_db, get_stats
+          init_db()
+          s = get_stats()
+          assert s['total'] > 0, f'No stores in database ({s[\"total\"]}). Run test or full first.'
+          print(f'Database has {s[\"total\"]} stores — generating site.')
+          "
           python run.py --generate
           python run.py --stats
 
