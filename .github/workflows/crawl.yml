@@ -276,8 +276,7 @@ jobs:
         if: >
           always() &&
           steps.mode.outputs.mode != 'smoke' &&
-          steps.mode.outputs.mode != 'generate' &&
-          secrets.NOTIFY_EMAIL_FROM != ''
+          steps.mode.outputs.mode != 'generate'
         run: |
           python << 'PY'
           import smtplib, os
