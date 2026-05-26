@@ -1,4 +1,4 @@
-# Crawl African Stores Canada directory (Bedrock + pipeline)
+# Crawl African Stores Canada directory
 #
 # Auth: GitHub OIDC → AWS IAM role (no long-lived access keys in secrets)
 #
@@ -14,12 +14,18 @@
 #
 # GitHub — Settings → Secrets and variables → Actions → Variables (required):
 #   AWS_ROLE_ARN = arn:aws:iam::ACCOUNT_ID:role/github-actions-african-stores
-# (Secret also works if you named it AWS_ROLE_ARN there instead.)
 #
-# Trust policy sub must match the branch you run from (e.g. repo:ORG/REPO:*).
+# Required secrets:
+#   MONGODB_URI           — Atlas connection string
+#   NOTIFY_EMAIL_FROM     — Gmail address sending the report
+#   NOTIFY_EMAIL_PASSWORD — Gmail app password (16 chars, not your login password)
+#   NOTIFY_EMAIL_TO       — Destination email address
 #
-# Required secret: MONGODB_URI (Atlas connection string)
 # Optional variables: AWS_REGION, BEDROCK_MODEL_ID, MONGODB_DB_NAME, MONGODB_COLLECTION
+#
+# Schedule:
+#   Weekly  — Sunday 6am ET  → agent test (Toronto only, ~10 min, ~$0.01)
+#   Monthly — 1st of month   → agent full (all 5 cities × 7 categories, ~45 min, ~$0.35)
 
 name: Crawl directory
 
@@ -29,23 +35,19 @@ on:
       mode:
         description: What to run
         required: true
-        default: test
+        default: agent
         type: choice
         options:
-          - test
-          - full
           - agent
           - agent-full
           - generate
           - smoke
-      restore_db:
-        description: Restore prior workflow artifact (legacy SQLite/output only; not used for MongoDB)
-        required: false
-        default: false
-        type: boolean
 
   schedule:
-    - cron: "0 12 * * 0"
+    # Weekly Sunday 6am ET (11:00 UTC) — agent test crawl (Toronto only)
+    - cron: "0 11 * * 0"
+    # Monthly 1st of month 3am ET (08:00 UTC) — agent full crawl (all cities)
+    - cron: "0 8 1 * *"
 
 concurrency:
   group: directory-crawl-${{ github.ref }}
@@ -63,12 +65,18 @@ env:
 
 jobs:
   crawl:
-    name: ${{ github.event_name == 'schedule' && 'Scheduled test crawl' || format('Crawl ({0})', inputs.mode) }}
+    name: >-
+      ${{ github.event_name == 'schedule' &&
+        (github.event.schedule == '0 8 1 * *' && 'Scheduled agent full crawl (monthly)' || 'Scheduled agent test crawl (weekly)') ||
+        format('Manual crawl ({0})', inputs.mode) }}
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ github.event_name == 'schedule' && 45 || (inputs.mode == 'full' && 180 || 45) }}
+    timeout-minutes: >-
+      ${{ (github.event_name == 'schedule' && github.event.schedule == '0 8 1 * *') && 180 ||
+          github.event_name == 'schedule' && 60 ||
+          inputs.mode == 'agent-full' && 180 || 60 }}
 
     permissions:
-      id-token: write # required for OIDC — must be on the job, not only workflow root
+      id-token: write
       contents: read
       actions: read
 
@@ -94,14 +102,14 @@ jobs:
           fi
           if [ -z "$ROLE_ARN" ]; then
             echo "::error::AWS_ROLE_ARN is not set."
-            echo "Add repository Variable: Settings → Secrets and variables → Actions → Variables"
+            echo "Add it under: Settings → Secrets and variables → Actions → Variables"
             echo "  Name: AWS_ROLE_ARN"
             echo "  Value: arn:aws:iam::ACCOUNT_ID:role/YOUR_ROLE_NAME"
             exit 1
           fi
           echo "AWS_ROLE_ARN is set (${#ROLE_ARN} characters)"
-          echo "Workflow ref: ${{ github.ref }} (must match IAM trust policy sub condition)"
-          echo "Repository: ${{ github.repository }}"
+          echo "Workflow ref: ${{ github.ref }}"
+          echo "Repository:   ${{ github.repository }}"
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -114,38 +122,34 @@ jobs:
         id: mode
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            echo "mode=test" >> "$GITHUB_OUTPUT"
-            echo "restore_db=false" >> "$GITHUB_OUTPUT"
+            SCHEDULE="${{ github.event.schedule }}"
+            if [ "$SCHEDULE" = "0 8 1 * *" ]; then
+              echo "mode=agent-full" >> "$GITHUB_OUTPUT"
+            else
+              echo "mode=agent" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
-            echo "restore_db=${{ inputs.restore_db }}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Restore database from previous run
-        if: steps.mode.outputs.restore_db == 'true'
-        continue-on-error: true
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: crawl.yml
-          name: directory-data
-          path: .
-          if_no_artifact_found: ignore
-          workflow_conclusion: success
-
-      - name: Bedrock smoke test
+      # ── Smoke test ────────────────────────────────────────────────────────────
+      - name: Bedrock + MongoDB smoke test
         if: steps.mode.outputs.mode == 'smoke'
         run: |
+          echo "--- LLM config ---"
           python -c "from config import llm_config_summary; print(llm_config_summary())"
+
+          echo "--- Bedrock connection ---"
           python -c "
           from config import get_llm
           print(get_llm().invoke('Reply in one sentence that Bedrock is working.').content)
-          print('✅ Bedrock chat OK')
+          print('✅ Bedrock OK')
           "
+
+          echo "--- Extractor chain ---"
           python <<'PY'
           import sys
           from extractor import extract_store_info
-
           r = extract_store_info(
               'Mama Africa Grocery, 45 Eglinton Ave, Toronto ON. West African foods.',
               'Toronto, Ontario',
@@ -153,65 +157,173 @@ jobs:
           if r and r.name:
               print('✅ Extractor OK:', r.name)
               sys.exit(0)
-
-          print('::error::Extractor failed.')
-          print('If the log mentions \"use case details\", complete the Anthropic form in')
-          print('Bedrock console (us-east-1) → Model catalog → Claude Haiku 4.5 →')
-          print('Submit use case details. Wait ~15 minutes, then re-run smoke.')
-          print('If the log mentions \"Marketplace\", enable the model in Bedrock console')
-          print('(Model access) as account admin, or add aws-marketplace:Subscribe to the IAM role.')
+          print('::error::Extractor returned no result.')
           sys.exit(1)
           PY
 
-      - name: Run pipeline (test)
-        if: steps.mode.outputs.mode == 'test'
-        run: |
-          python run.py
-          python run.py --generate
-          python run.py --stats
-
-      - name: Run pipeline (full)
-        if: steps.mode.outputs.mode == 'full'
-        run: |
-          python run.py --full
-          python run.py --stats
-
-      - name: Run LangGraph agent (single city test)
-        if: steps.mode.outputs.mode == 'agent'
-        run: |
-          python run.py --agent
-          python run.py --generate
-          python run.py --stats
-
-      - name: Run LangGraph agent (full crawl)
-        if: steps.mode.outputs.mode == 'agent-full'
-        run: |
-          python run.py --agent-full
-          python run.py --stats
-
-      - name: Generate site only
-        if: steps.mode.outputs.mode == 'generate'
-        run: |
-          # FIX: check the active storage backend (MongoDB in CI), not SQLite.
-          # The old check `test -f african_stores.db` always passed vacuously
-          # when STORAGE_BACKEND=mongodb, generating an empty site silently.
+          echo "--- MongoDB connection ---"
           python -c "
           from storage import init_db, get_stats
           init_db()
           s = get_stats()
-          assert s['total'] > 0, f'No stores in database ({s[\"total\"]}). Run test or full first.'
+          print(f'✅ MongoDB OK — {s[\"total\"]} stores in database')
+          "
+
+      # ── Agent: Toronto test ───────────────────────────────────────────────────
+      - name: Run LangGraph agent — Toronto test
+        if: steps.mode.outputs.mode == 'agent'
+        id: agent_test
+        run: |
+          python run.py --agent 2>&1 | tee /tmp/crawl_output.txt
+          python run.py --generate
+          python run.py --stats 2>&1 | tee -a /tmp/crawl_output.txt
+
+      # ── Agent: full crawl ─────────────────────────────────────────────────────
+      - name: Run LangGraph agent — full crawl
+        if: steps.mode.outputs.mode == 'agent-full'
+        id: agent_full
+        run: |
+          python run.py --agent-full 2>&1 | tee /tmp/crawl_output.txt
+          python run.py --generate
+          python run.py --stats 2>&1 | tee -a /tmp/crawl_output.txt
+
+      # ── Generate site ─────────────────────────────────────────────────────────
+      - name: Generate site only
+        if: steps.mode.outputs.mode == 'generate'
+        run: |
+          python -c "
+          from storage import init_db, get_stats
+          init_db()
+          s = get_stats()
+          assert s['total'] > 0, f'No stores in database ({s[\"total\"]}). Run agent or agent-full first.'
           print(f'Database has {s[\"total\"]} stores — generating site.')
           "
           python run.py --generate
           python run.py --stats
 
-      - name: Upload database and site
+      # ── Build email report ────────────────────────────────────────────────────
+      - name: Build crawl report
+        if: always() && steps.mode.outputs.mode != 'smoke' && steps.mode.outputs.mode != 'generate'
+        id: report
+        run: |
+          python << 'PY'
+          import os, re
+
+          mode    = "${{ steps.mode.outputs.mode }}"
+          status  = "${{ job.status }}"
+          run_url = "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          trigger = "${{ github.event_name }}"
+          trigger_label = "Scheduled" if trigger == "schedule" else "Manual"
+
+          # Parse stats from crawl output
+          output_file = "/tmp/crawl_output.txt"
+          output = open(output_file).read() if os.path.exists(output_file) else ""
+
+          saved  = len(re.findall(r"\[save\] Saved:", output))
+          skipped = len(re.findall(r"(?:skipped|Already exists)", output, re.IGNORECASE))
+          total_match = re.search(r"Total stores:\s*(\d+)", output)
+          total  = total_match.group(1) if total_match else "unknown"
+
+          city_lines = re.findall(r"  (\w[\w\s]+):\s*(\d+) stores", output)
+          city_summary = "\n".join(f"  • {city}: {count} stores" for city, count in city_lines)
+
+          status_emoji = "✅" if status == "success" else "❌"
+          mode_label = "Toronto test" if mode == "agent" else "Full crawl (all cities)"
+
+          subject = f"{status_emoji} African Stores Crawl — {mode_label} ({status.upper()})"
+
+          body = f"""African Stores Canada — Crawl Report
+          {'='*50}
+
+          Run type:  {trigger_label} {mode_label}
+          Status:    {status_emoji} {status.upper()}
+          Time:      ${{ github.run_started_at }}
+
+          RESULTS
+          {'─'*30}
+          New stores saved:   {saved}
+          Duplicates skipped: {skipped}
+          Total in database:  {total}
+
+          BY CITY
+          {'─'*30}
+          {city_summary or '  (no city breakdown available)'}
+
+          ACTIONS LOG
+          {'─'*30}
+          {run_url}
+
+          ---
+          African Stores Canada · kere-sifon/african-stores-agent
+          Powered by AWS Bedrock + LangGraph + MongoDB Atlas
+          """
+
+          # Strip leading whitespace from heredoc
+          body = "\n".join(line.lstrip() for line in body.split("\n"))
+
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"EMAIL_SUBJECT={subject}\n")
+
+          with open("/tmp/email_body.txt", "w") as f:
+              f.write(body)
+
+          print(f"Subject: {subject}")
+          print(f"Saved: {saved}, Skipped: {skipped}, Total: {total}")
+          PY
+
+      # ── Send email ────────────────────────────────────────────────────────────
+      - name: Send crawl report email
+        if: >
+          always() &&
+          steps.mode.outputs.mode != 'smoke' &&
+          steps.mode.outputs.mode != 'generate' &&
+          secrets.NOTIFY_EMAIL_FROM != ''
+        run: |
+          python << 'PY'
+          import smtplib, os
+          from email.mime.text import MIMEText
+          from email.mime.multipart import MIMEMultipart
+
+          from_addr  = os.environ.get("NOTIFY_FROM", "")
+          password   = os.environ.get("NOTIFY_PASSWORD", "")
+          to_addr    = os.environ.get("NOTIFY_TO", "")
+          subject    = os.environ.get("EMAIL_SUBJECT", "African Stores Crawl Report")
+
+          if not all([from_addr, password, to_addr]):
+              print("⚠️  Email secrets not configured — skipping notification")
+              print("   Add NOTIFY_EMAIL_FROM, NOTIFY_EMAIL_PASSWORD, NOTIFY_EMAIL_TO")
+              print("   to GitHub Secrets to enable email reports.")
+              exit(0)
+
+          body = open("/tmp/email_body.txt").read()
+
+          msg = MIMEMultipart("alternative")
+          msg["Subject"] = subject
+          msg["From"]    = f"African Stores Crawler <{from_addr}>"
+          msg["To"]      = to_addr
+          msg.attach(MIMEText(body, "plain"))
+
+          try:
+              with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                  server.login(from_addr, password)
+                  server.sendmail(from_addr, to_addr, msg.as_string())
+              print(f"✅ Report sent to {to_addr}")
+          except Exception as e:
+              print(f"⚠️  Email failed: {e}")
+              print("   Check NOTIFY_EMAIL_FROM and NOTIFY_EMAIL_PASSWORD secrets")
+              exit(0)  # Don't fail the workflow if email fails
+          PY
+        env:
+          NOTIFY_FROM:     ${{ secrets.NOTIFY_EMAIL_FROM }}
+          NOTIFY_PASSWORD: ${{ secrets.NOTIFY_EMAIL_PASSWORD }}
+          NOTIFY_TO:       ${{ secrets.NOTIFY_EMAIL_TO }}
+
+      # ── Upload site artifact ──────────────────────────────────────────────────
+      - name: Upload site artifact
         if: always() && steps.mode.outputs.mode != 'smoke'
         uses: actions/upload-artifact@v4
         with:
-          name: directory-data
-          path: |
-            african_stores.db
-            output/
+          name: directory-site
+          path: output/
           retention-days: 30
           if-no-files-found: warn
