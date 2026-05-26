@@ -149,14 +149,20 @@ def build_agent(use_checkpointing: bool = True):
       When MONGODB_URI is set, agent state is persisted after every node.
       If the run crashes, the next invocation with the same thread_id resumes
       from where it stopped rather than starting over.
+
+    NOTE: MongoDBSaver.from_conn_string() returns a context manager, not a
+    direct instance. Pass a pymongo MongoClient to the constructor directly.
     """
     graph = build_graph()
 
     checkpointer = None
     if use_checkpointing and MONGODB_URI:
         try:
+            from pymongo import MongoClient
             from langgraph.checkpoint.mongodb import MongoDBSaver
-            checkpointer = MongoDBSaver.from_conn_string(MONGODB_URI)
+
+            mongo_client = MongoClient(MONGODB_URI)
+            checkpointer = MongoDBSaver(mongo_client)
             print("[agent] Checkpointing enabled (MongoDB)")
         except ImportError:
             print("[agent] langgraph-checkpoint-mongodb not installed — no checkpointing")
