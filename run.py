@@ -10,16 +10,19 @@
 #   python run.py --stats           print DB summary
 
 import sys
-from storage import init_db, get_stats
+
+from storage import get_stats, init_db
 
 
 def run_test():
     from pipeline import run_test_pipeline
+
     run_test_pipeline()
 
 
 def run_full():
     from pipeline import run_full_pipeline
+
     run_full_pipeline()
     generate()
 
@@ -30,7 +33,7 @@ def run_agent_test():
     from config import llm_config_summary
 
     init_db()
-    print(f"🤖 LangGraph agent test: African grocery stores in Toronto")
+    print("🤖 LangGraph agent test: African grocery stores in Toronto")
     print(f"   LLM: {llm_config_summary()}\n")
 
     app = build_agent()
@@ -41,12 +44,14 @@ def run_agent_test():
 def run_agent_full():
     """LangGraph agent — full crawl across all cities and categories."""
     from agent import run_full_crawl
+
     run_full_crawl()
     generate()
 
 
 def generate():
     from generator import generate_site
+
     generate_site()
 
 

@@ -25,7 +25,7 @@ else:
 def storage_summary() -> str:
     """Human-readable backend label for logs."""
     if STORAGE_BACKEND == "mongodb":
-        from config import MONGODB_DB_NAME, MONGODB_COLLECTION
+        from config import MONGODB_COLLECTION, MONGODB_DB_NAME
 
         return f"backend=mongodb db={MONGODB_DB_NAME} collection={MONGODB_COLLECTION}"
     from config import DB_PATH

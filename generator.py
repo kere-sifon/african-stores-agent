@@ -7,13 +7,13 @@
 # Run this after the agent crawl: python generator.py
 # ─────────────────────────────────────────────────────────────────────────────
 
-import os
 import re
-import json
 from pathlib import Path
-from jinja2 import Environment, BaseLoader
-from storage import get_all_stores, init_db
+
+from jinja2 import BaseLoader, Environment, select_autoescape
+
 from config import OUTPUT_DIR
+from storage import get_all_stores, init_db
 
 OUTPUT_PATH = Path(OUTPUT_DIR)
 STORES_PATH = OUTPUT_PATH / "stores"
@@ -478,7 +478,10 @@ def generate_site():
     cities = sorted({s["city"] for s in stores if s.get("city")})
     categories = sorted({s["category"] for s in stores if s.get("category")})
 
-    env = Environment(loader=BaseLoader())
+    env = Environment(
+        loader=BaseLoader(),
+        autoescape=select_autoescape(default=True),
+    )
 
     # ── Index page ─────────────────────────────────────────────────────────────
     index_tpl = env.from_string(INDEX_TEMPLATE)

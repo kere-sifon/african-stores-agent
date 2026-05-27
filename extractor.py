@@ -6,13 +6,13 @@
 
 from functools import lru_cache
 
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.exceptions import OutputParserException
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable
 
-from models import StoreInfo
 from config import get_llm, llm_config_summary
+from models import StoreInfo
 
 _parser = JsonOutputParser(pydantic_object=StoreInfo)
 
@@ -20,7 +20,7 @@ _prompt = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            """You are a data extraction assistant. Your job is to extract structured 
+            """You are a data extraction assistant. Your job is to extract structured
 information about African stores in Canada from raw web page text.
 
 Rules:

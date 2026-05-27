@@ -1,7 +1,7 @@
 # Makefile — African Stores Canada Agent
 # Run `make help` to see all commands
 
-.PHONY: help setup test crawl generate stats clean lint test-llm test-extract test-bedrock
+.PHONY: help setup setup-dev test crawl generate stats clean lint security pre-commit-install test-llm test-extract test-bedrock
 
 PYTHON := .venv/bin/python
 PIP    := .venv/bin/pip
@@ -18,6 +18,8 @@ help:
 	@echo "  make stats      Print database summary"
 	@echo "  make clean      Remove generated output and database"
 	@echo "  make lint       Run ruff linter"
+	@echo "  make security   Run all pre-commit security hooks"
+	@echo "  make pre-commit-install  Install git hooks (run once per clone)"
 	@echo "  make test-llm   Smoke-test get_llm() (Bedrock or Ollama)"
 	@echo "  make test-extract  Test extraction chain on fixture text"
 	@echo ""
@@ -29,6 +31,11 @@ setup:
 	$(PIP) install -r requirements.txt
 	@echo ""
 	@echo "✅ Environment ready. Activate with: source .venv/bin/activate"
+	@echo "   Optional: make setup-dev && make pre-commit-install"
+
+setup-dev:
+	$(PIP) install -r requirements-dev.txt
+	@echo "✅ Dev tools installed (pre-commit, bandit, ruff, pip-audit)"
 
 # ── Verify Ollama ──────────────────────────────────────────────────────────────
 check-ollama:
@@ -96,6 +103,15 @@ clean: clean-output clean-db
 # ── Lint ───────────────────────────────────────────────────────────────────────
 lint:
 	$(PYTHON) -m ruff check . --fix
+
+security:
+	@command -v pre-commit >/dev/null || { echo "Run: make setup-dev"; exit 1; }
+	pre-commit run --all-files
+
+pre-commit-install:
+	@command -v pre-commit >/dev/null || { echo "Run: make setup-dev"; exit 1; }
+	pre-commit install
+	@echo "✅ Pre-commit hooks installed — they run on every git commit"
 
 # ── Git ────────────────────────────────────────────────────────────────────────
 init-repo:

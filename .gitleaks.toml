@@ -1,0 +1,11 @@
+title = "african-stores-agent gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allow known safe placeholders and generated artifacts"
+paths = [
+  '''\.env\.example$''',
+  '''^README\.md$''',
+]

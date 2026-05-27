@@ -10,24 +10,24 @@
 #   This is the ReAct loop: Reason → Act → Observe → Reason → ...
 # ─────────────────────────────────────────────────────────────────────────────
 
-import time
 import json
 import re
+import time
+
 import requests
 from bs4 import BeautifulSoup
-from typing import Optional
+
+# LangChain's built-in DuckDuckGo search tool (no API key required).
+from langchain_community.tools import DuckDuckGoSearchResults
 
 # LangChain tool decorator — turns any Python function into a tool the agent
 # can discover and invoke.
 from langchain_core.tools import tool
 
-# LangChain's built-in DuckDuckGo search tool (no API key required).
-from langchain_community.tools import DuckDuckGoSearchResults
-
 from config import CRAWL_DELAY_SECONDS
 from models import StoreInfo
 from pipeline import store_meets_quality
-from storage import save_store, store_exists, get_stats
+from storage import get_stats, save_store, store_exists
 
 # ── Utility ───────────────────────────────────────────────────────────────────
 
@@ -54,6 +54,7 @@ def _clean_text(html: str, max_chars: int = 4000) -> str:
 
 # ── Tool 1: Web search ────────────────────────────────────────────────────────
 
+
 @tool
 def search_for_stores(query: str) -> str:
     """
@@ -79,6 +80,7 @@ def search_for_stores(query: str) -> str:
 
 # ── Tool 2: Web scraper ───────────────────────────────────────────────────────
 
+
 @tool
 def scrape_page(url: str) -> str:
     """
@@ -98,6 +100,7 @@ def scrape_page(url: str) -> str:
 
 
 # ── Tool 3: Save a store ──────────────────────────────────────────────────────
+
 
 @tool
 def save_store_to_db(store_json: str) -> str:
@@ -140,6 +143,7 @@ def save_store_to_db(store_json: str) -> str:
 
 # ── Tool 4: Check database stats ──────────────────────────────────────────────
 
+
 @tool
 def get_database_stats(_: str = "") -> str:
     """
@@ -162,6 +166,7 @@ def get_database_stats(_: str = "") -> str:
 
 # ── Tool 5: Check if store already exists ─────────────────────────────────────
 
+
 @tool
 def check_store_exists(name_and_city: str) -> str:
     """
@@ -178,6 +183,7 @@ def check_store_exists(name_and_city: str) -> str:
 
 
 # ── Tool registry ─────────────────────────────────────────────────────────────
+
 
 def get_all_tools():
     """Return all tools to register with the agent."""

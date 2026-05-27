@@ -1,0 +1,19 @@
+[project]
+name = "african-stores-agent"
+requires-python = ">=3.11"
+
+[tool.bandit]
+exclude_dirs = [".venv", "output", ".git"]
+skips = ["B101"]  # assert_used (acceptable in dev scripts)
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [".venv", "output"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+# Embedded HTML/CSS templates — line length not practical
+"generator.py" = ["E501"]

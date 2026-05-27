@@ -85,15 +85,11 @@ def save_store(store: StoreInfo) -> tuple[bool, str]:
 
 def get_all_stores() -> List[dict]:
     with get_connection() as conn:
-        rows = conn.execute(
-            "SELECT * FROM stores ORDER BY province, city, name"
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM stores ORDER BY province, city, name").fetchall()
     stores = []
     for row in rows:
         d = dict(row)
-        d["products_and_specialties"] = json.loads(
-            d.get("products_and_specialties") or "[]"
-        )
+        d["products_and_specialties"] = json.loads(d.get("products_and_specialties") or "[]")
         stores.append(d)
     return stores
 
@@ -108,9 +104,7 @@ def get_stores_by_city(city: str) -> List[dict]:
 
 
 def _row_to_dict(d: dict) -> dict:
-    d["products_and_specialties"] = json.loads(
-        d.get("products_and_specialties") or "[]"
-    )
+    d["products_and_specialties"] = json.loads(d.get("products_and_specialties") or "[]")
     return d
 
 
