@@ -12,7 +12,13 @@ target-version = "py311"
 exclude = [".venv", "output"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W"]
+# E/F/W = style & errors | I = import sort | B = bugbear | UP = pyupgrade | S = security (subset)
+select = ["E", "F", "I", "W", "B", "UP", "S"]
+ignore = [
+    "S101",  # assert (allowed in dev scripts; bandit B101 also skipped)
+    "S603",  # subprocess — not used
+    "S607",  # partial executable path
+]
 
 [tool.ruff.lint.per-file-ignores]
 # Embedded HTML/CSS templates — line length not practical

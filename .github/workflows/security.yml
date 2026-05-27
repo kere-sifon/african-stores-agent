@@ -1,5 +1,5 @@
-# Security checks for the develop branch (and PRs targeting develop).
-# Mirrors local pre-commit hooks plus dependency auditing.
+# Security + code quality for develop.
+# Local parity: make pre-commit-install && make security
 
 name: Security
 
@@ -33,6 +33,47 @@ jobs:
 
       - name: Run pre-commit
         uses: pre-commit/action@v3.0.1
+
+  code-quality:
+    name: Ruff (lint + format)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Ruff
+        run: pip install "ruff==0.9.6"
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Ruff format
+        run: ruff format --check .
+
+  sast-bandit:
+    name: Bandit (Python SAST)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Bandit
+        run: pip install "bandit[toml]==1.8.3"
+
+      - name: Run Bandit
+        run: bandit -r . -c pyproject.toml -ll
 
   dependency-audit:
     name: pip-audit (requirements.txt)

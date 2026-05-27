@@ -140,16 +140,31 @@ make security             # run all hooks manually (same as CI)
 
 What runs:
 
-| Check | Tool | Purpose |
-|---|---|---|
-| Secrets | Gitleaks | Block API keys, tokens, credentials in commits |
-| Python SAST | Bandit | Common security issues in Python code |
-| Lint | Ruff | Style/errors before merge |
-| Dependencies | pip-audit (CI) | Known vulnerabilities in `requirements.txt` |
+| Layer | Tool | Where | Purpose |
+|---|---|---|---|
+| **Secrets** | Gitleaks | pre-commit + CI | Block keys/tokens in commits and history |
+| **SAST (Python)** | Bandit | pre-commit + CI | Insecure patterns (`requests`, SQL, etc.) |
+| **SAST (deep)** | CodeQL | CI (`codeql.yml`) | GitHub query-based analysis; results in Security tab |
+| **Code quality** | Ruff | pre-commit + CI | Lint (E/F/W/B/S) + format |
+| **Dependencies** | pip-audit | CI | CVEs in `requirements.txt` |
 
-**GitHub:** `.github/workflows/security.yml` must pass before merging to `develop`. In repo settings → Branches → `develop` → add required status checks: `Pre-commit (secrets, bandit, ruff)`, `pip-audit (requirements.txt)`, and `Gitleaks (full history)`.
+**Local commands:**
 
-CI uses the open-source [Gitleaks](https://github.com/gitleaks/gitleaks) CLI (no `GITLEAKS_LICENSE` secret). The third-party `gitleaks-action` requires a license for organization repos even if you add the secret — only use that action if you pass `GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}` in the step `env`.
+```bash
+make quality    # Ruff + Bandit only (fast)
+make security   # Full pre-commit (secrets + quality + file checks)
+```
+
+**GitHub workflows:**
+
+| Workflow | Jobs to require on `develop` |
+|---|---|
+| `security.yml` | Pre-commit, Ruff (lint + format), Bandit (Python SAST), pip-audit, Gitleaks |
+| `codeql.yml` | CodeQL (Python) |
+
+Enable **CodeQL** under Settings → Code security → Code scanning (default for public repos; enable for private org repos).
+
+CI uses the open-source [Gitleaks](https://github.com/gitleaks/gitleaks) CLI (no `GITLEAKS_LICENSE` secret).
 
 Dependabot opens weekly update PRs against `develop` (see `.github/dependabot.yml`).
 

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import UTC, datetime
 
 from pymongo import ASCENDING, MongoClient
 from pymongo.collection import Collection
@@ -25,7 +24,7 @@ def _get_collection() -> Collection:
     return _client[MONGODB_DB_NAME][MONGODB_COLLECTION]
 
 
-def _keys(name: str, city: Optional[str]) -> tuple[str, str]:
+def _keys(name: str, city: str | None) -> tuple[str, str]:
     return name.strip().lower(), (city or "").strip().lower()
 
 
@@ -48,7 +47,7 @@ def _store_to_doc(store: StoreInfo) -> dict:
         "description": store.description,
         "products_and_specialties": store.products_and_specialties or [],
         "source_url": store.source_url,
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
     }
 
 
@@ -91,19 +90,19 @@ def save_store(store: StoreInfo) -> tuple[bool, str]:
         return False, f"DB error: {e}"
 
 
-def get_all_stores() -> List[dict]:
+def get_all_stores() -> list[dict]:
     coll = _get_collection()
     cursor = coll.find().sort([("province", 1), ("city", 1), ("name", 1)])
     return [_doc_to_dict(doc) for doc in cursor]
 
 
-def get_stores_by_city(city: str) -> List[dict]:
+def get_stores_by_city(city: str) -> list[dict]:
     coll = _get_collection()
     cursor = coll.find({"city_lower": city.strip().lower()}).sort("name", 1)
     return [_doc_to_dict(doc) for doc in cursor]
 
 
-def store_exists(name: str, city: Optional[str]) -> bool:
+def store_exists(name: str, city: str | None) -> bool:
     name_lower, city_lower = _keys(name, city)
     return (
         _get_collection().find_one(

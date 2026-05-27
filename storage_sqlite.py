@@ -2,7 +2,6 @@
 
 import json
 import sqlite3
-from typing import List, Optional
 
 from config import DB_PATH
 from models import StoreInfo
@@ -83,7 +82,7 @@ def save_store(store: StoreInfo) -> tuple[bool, str]:
         return False, f"DB error: {e}"
 
 
-def get_all_stores() -> List[dict]:
+def get_all_stores() -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute("SELECT * FROM stores ORDER BY province, city, name").fetchall()
     stores = []
@@ -94,7 +93,7 @@ def get_all_stores() -> List[dict]:
     return stores
 
 
-def get_stores_by_city(city: str) -> List[dict]:
+def get_stores_by_city(city: str) -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT * FROM stores WHERE LOWER(city) = LOWER(?) ORDER BY name",
@@ -108,7 +107,7 @@ def _row_to_dict(d: dict) -> dict:
     return d
 
 
-def store_exists(name: str, city: Optional[str]) -> bool:
+def store_exists(name: str, city: str | None) -> bool:
     with get_connection() as conn:
         row = conn.execute(
             "SELECT 1 FROM stores WHERE LOWER(name) = LOWER(?) AND LOWER(city) = LOWER(?)",
