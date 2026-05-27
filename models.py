@@ -5,7 +5,8 @@
 # JSON that matches the schema, and Pydantic validates it automatically.
 # ─────────────────────────────────────────────────────────────────────────────
 
-from typing import Optional, List
+from typing import List, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -43,9 +44,7 @@ class StoreInfo(BaseModel):
     website: Optional[str] = Field(default=None, description="Website URL")
     email: Optional[str] = Field(default=None, description="Email address")
 
-    hours: Optional[str] = Field(
-        default=None, description="Opening hours as a plain string"
-    )
+    hours: Optional[str] = Field(default=None, description="Opening hours as a plain string")
 
     # FIX: description was `str` (required) but the LLM sometimes returns null,
     # causing a Pydantic ValidationError and dropping otherwise valid records.

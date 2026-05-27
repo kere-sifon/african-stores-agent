@@ -128,6 +128,31 @@ Then open `output/index.html` in your browser.
 python run.py --stats
 ```
 
+### Security (develop branch)
+
+Security checks run **locally on every commit** (after you install hooks) and in **GitHub Actions** on push/PR to `develop`.
+
+```bash
+make setup-dev
+make pre-commit-install   # once per clone — wires hooks into git commit
+make security             # run all hooks manually (same as CI)
+```
+
+What runs:
+
+| Check | Tool | Purpose |
+|---|---|---|
+| Secrets | Gitleaks | Block API keys, tokens, credentials in commits |
+| Python SAST | Bandit | Common security issues in Python code |
+| Lint | Ruff | Style/errors before merge |
+| Dependencies | pip-audit (CI) | Known vulnerabilities in `requirements.txt` |
+
+**GitHub:** `.github/workflows/security.yml` must pass before merging to `develop`. In repo settings → Branches → `develop` → add required status checks: `Pre-commit (secrets, bandit, ruff)`, `pip-audit (requirements.txt)`, and `Gitleaks (full history)`.
+
+CI uses the open-source [Gitleaks](https://github.com/gitleaks/gitleaks) CLI (no `GITLEAKS_LICENSE` secret). The third-party `gitleaks-action` requires a license for organization repos even if you add the secret — only use that action if you pass `GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}` in the step `env`.
+
+Dependabot opens weekly update PRs against `develop` (see `.github/dependabot.yml`).
+
 ### Optional — LangGraph agent mode
 
 If you want the more flexible agent-driven approach (useful for experimentation):
@@ -165,7 +190,7 @@ african-stores-agent/
 ## Next Steps / Extensions
 
 - **Add a FastAPI layer** — serve the SQLite data as a REST API
-- **Scheduled re-crawl** — launchd plist to run weekly and keep data fresh  
+- **Scheduled re-crawl** — launchd plist to run weekly and keep data fresh
 - **Better deduplication** — use your local LLM to merge near-duplicate entries
 - **Enrich with Google Places API** — add ratings, photos, reviews
 - **Deploy to S3** — `aws s3 sync output/ s3://your-bucket --acl public-read`

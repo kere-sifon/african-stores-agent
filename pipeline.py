@@ -23,27 +23,26 @@ import time
 from typing import Optional
 from urllib.parse import unquote
 
-from langchain_community.tools import DuckDuckGoSearchResults
-
-from extractor import extract_store_info
-from storage import init_db, save_store, store_exists, get_stats
-from config import (
-    TARGET_CITIES,
-    SEARCH_QUERIES,
-    MAX_RESULTS_PER_QUERY,
-    CRAWL_DELAY_SECONDS,
-    STORE_CONTACT_RULE,
-    DIRECTORY_SITES,
-    DIRECTORY_SITES_PER_RUN,
-    YELP_LISTINGS_PER_RUN,
-    DIASPORA_LISTINGS_PER_RUN,
-    MAPS_SEARCH_ENABLED,
-    MAPS_SEARCH_RESULTS,
-)
-from models import StoreInfo
-
 import requests
 from bs4 import BeautifulSoup
+from langchain_community.tools import DuckDuckGoSearchResults
+
+from config import (
+    CRAWL_DELAY_SECONDS,
+    DIASPORA_LISTINGS_PER_RUN,
+    DIRECTORY_SITES,
+    DIRECTORY_SITES_PER_RUN,
+    MAPS_SEARCH_ENABLED,
+    MAPS_SEARCH_RESULTS,
+    MAX_RESULTS_PER_QUERY,
+    SEARCH_QUERIES,
+    STORE_CONTACT_RULE,
+    TARGET_CITIES,
+    YELP_LISTINGS_PER_RUN,
+)
+from extractor import extract_store_info
+from models import StoreInfo
+from storage import get_stats, init_db, save_store, store_exists
 
 HEADERS = {
     "User-Agent": (
@@ -55,65 +54,159 @@ HEADERS = {
 
 # Domains that reliably block scrapers — skip immediately
 BLOCKED_DOMAINS = [
-    "facebook.com", "instagram.com", "tiktok.com", "youtube.com", "youtu.be",
-    "twitter.com", "linkedin.com", "reddit.com",
-    "narcity.com", "blogto.com", "bestbuy.ca", "canada.ca", "amazon.ca",
-    "play.google.com", "support.google.com", "developers.google.com",
+    "facebook.com",
+    "instagram.com",
+    "tiktok.com",
+    "youtube.com",
+    "youtu.be",
+    "twitter.com",
+    "linkedin.com",
+    "reddit.com",
+    "narcity.com",
+    "blogto.com",
+    "bestbuy.ca",
+    "canada.ca",
+    "amazon.ca",
+    "play.google.com",
+    "support.google.com",
+    "developers.google.com",
     "mapsplatform.google.com",
     "thatlocalgirl.com",
     "ileoja.ca",  # listicles / directory articles, not individual stores
-    "cbc.ca", "nih.gov", "ncbi.nlm.nih.gov",
+    "cbc.ca",
+    "nih.gov",
+    "ncbi.nlm.nih.gov",
 ]
 
 # Cities accepted when crawling a given TARGET_CITIES entry (GTA for Toronto, etc.)
 CITY_SEARCH_ALIASES: dict[str, frozenset[str]] = {
-    "toronto, ontario": frozenset({
-        "toronto", "scarborough", "north york", "etobicoke", "mississauga",
-        "brampton", "markham", "thornhill", "vaughan", "richmond hill",
-        "ajax", "pickering", "oakville", "hamilton",
-    }),
-    "montreal, quebec": frozenset({
-        "montreal", "laval", "longueuil", "brossard", "terrebonne",
-    }),
+    "toronto, ontario": frozenset(
+        {
+            "toronto",
+            "scarborough",
+            "north york",
+            "etobicoke",
+            "mississauga",
+            "brampton",
+            "markham",
+            "thornhill",
+            "vaughan",
+            "richmond hill",
+            "ajax",
+            "pickering",
+            "oakville",
+            "hamilton",
+        }
+    ),
+    "montreal, quebec": frozenset(
+        {
+            "montreal",
+            "laval",
+            "longueuil",
+            "brossard",
+            "terrebonne",
+        }
+    ),
     "calgary, alberta": frozenset({"calgary", "airdrie"}),
-    "vancouver, british columbia": frozenset({
-        "vancouver", "burnaby", "surrey", "richmond", "new westminster",
-    }),
+    "vancouver, british columbia": frozenset(
+        {
+            "vancouver",
+            "burnaby",
+            "surrey",
+            "richmond",
+            "new westminster",
+        }
+    ),
     "ottawa, ontario": frozenset({"ottawa", "gatineau", "kanata", "nepean"}),
 }
 
 # Major chains — never directory entries for African store searches
 EXCLUDED_MAJOR_CHAINS = (
-    "loblaws", "loblaw", "walmart", "sobeys", "nofrills", "no frills",
-    "costco", "real canadian superstore", "food basics", "freshco", "longo's",
-    "farm boy", "whole foods", "shoppers drug", "giant tiger",
+    "loblaws",
+    "loblaw",
+    "walmart",
+    "sobeys",
+    "nofrills",
+    "no frills",
+    "costco",
+    "real canadian superstore",
+    "food basics",
+    "freshco",
+    "longo's",
+    "farm boy",
+    "whole foods",
+    "shoppers drug",
+    "giant tiger",
 )
 
 # Directory platform names mistaken for store names by the extractor
 INVALID_BUSINESS_NAMES = (
-    "diasporastores", "diasporastores.ca", "diaspora stores", "yelp", "yelp.ca",
+    "diasporastores",
+    "diasporastores.ca",
+    "diaspora stores",
+    "yelp",
+    "yelp.ca",
 )
 
 AFRICAN_SIGNALS = (
-    "african", "nigerian", "ghana", "ghanaian", "ethiopian", "somali", "kenyan",
-    "congolese", "cameroon", "senegal", "west african", "east african", "caribbean",
-    "jollof", "egusi", "plantain", "injera", "fufu", "suya", "mychopchop", "chopchop",
+    "african",
+    "nigerian",
+    "ghana",
+    "ghanaian",
+    "ethiopian",
+    "somali",
+    "kenyan",
+    "congolese",
+    "cameroon",
+    "senegal",
+    "west african",
+    "east african",
+    "caribbean",
+    "jollof",
+    "egusi",
+    "plantain",
+    "injera",
+    "fufu",
+    "suya",
+    "mychopchop",
+    "chopchop",
 )
 
 # region_focus values that indicate a real African grocery (not generic SEO)
 SPECIFIC_AFRICAN_REGIONS = (
-    "west african", "east african", "south african", "central african",
-    "nigerian", "ghanaian", "ethiopian", "somali", "senegalese", "kenyan",
-    "congolese", "cameroonian", "caribbean",
+    "west african",
+    "east african",
+    "south african",
+    "central african",
+    "nigerian",
+    "ghanaian",
+    "ethiopian",
+    "somali",
+    "senegalese",
+    "kenyan",
+    "congolese",
+    "cameroonian",
+    "caribbean",
 )
 
 STRONG_AFRICAN_DESC_PHRASES = (
-    "african groc", "african food", "african market", "african restaurant",
-    "african essentials", "authentic african", "west african", "east african",
-    "south african", "nigerian", "ghanaian", "ethiopian", "caribbean grocery",
+    "african groc",
+    "african food",
+    "african market",
+    "african restaurant",
+    "african essentials",
+    "authentic african",
+    "west african",
+    "east african",
+    "south african",
+    "nigerian",
+    "ghanaian",
+    "ethiopian",
+    "caribbean grocery",
 )
 
 # ── Step 1: Search ─────────────────────────────────────────────────────────────
+
 
 def search(query: str, num_results: int = 8) -> list[dict]:
     """Call DuckDuckGo and return list of {title, url, snippet}."""
@@ -197,16 +290,15 @@ def search_for_city(category: str, city: str) -> list[dict]:
         merged.setdefault(row["url"], row)
 
     results = [
-        r for r in merged.values()
+        r
+        for r in merged.values()
         if not is_blocked_url(r["url"])
         and not is_yelp_search_or_list_page(r["url"], r.get("title", ""))
     ]
     results = [
-        r for r in results
-        if not (
-            "/maps/place/" in r["url"].lower()
-            and not is_google_maps_place(r["url"])
-        )
+        r
+        for r in results
+        if not ("/maps/place/" in r["url"].lower() and not is_google_maps_place(r["url"]))
     ]
     results.sort(key=_result_sort_key)
     results = _balance_result_queue(results)
@@ -230,9 +322,7 @@ def _balance_result_queue(results: list[dict]) -> list[dict]:
             other_rows.append(row)
 
     return (
-        yelp_rows[:YELP_LISTINGS_PER_RUN]
-        + diaspora_rows[:DIASPORA_LISTINGS_PER_RUN]
-        + other_rows
+        yelp_rows[:YELP_LISTINGS_PER_RUN] + diaspora_rows[:DIASPORA_LISTINGS_PER_RUN] + other_rows
     )
 
 
@@ -264,6 +354,7 @@ def _result_sort_key(row: dict) -> tuple[int, int]:
 
 # ── Step 2: Filter URLs ────────────────────────────────────────────────────────
 
+
 def is_blocked_url(url: str) -> bool:
     """Block junk domains; allow Yelp /biz/, Maps /place/, diaspora store listings."""
     lower = url.lower()
@@ -287,6 +378,7 @@ def is_scrapeable(url: str) -> bool:
 
 
 # ── Step 3: Scrape ─────────────────────────────────────────────────────────────
+
 
 def scrape(url: str, max_chars: int = 4000) -> Optional[str]:
     """
@@ -312,6 +404,7 @@ def scrape(url: str, max_chars: int = 4000) -> Optional[str]:
 
 
 # ── Step 4 + 5: Extract and save ───────────────────────────────────────────────
+
 
 def _is_store_website(url: str) -> bool:
     if not url or not url.strip():
@@ -494,10 +587,7 @@ def align_city_with_search(store: StoreInfo, city_hint: str, source_url: str = "
 
     # Nationwide online grocer — no physical address in the search metro
     if not has_address and (store.website or store.source_url):
-        if any(
-            term in desc
-            for term in ("online", "canada", "delivery", "ship", "nationwide")
-        ):
+        if any(term in desc for term in ("online", "canada", "delivery", "ship", "nationwide")):
             store.city = hint_city
             print(f"  [save] Online retailer listed under {hint_city}")
             return True
@@ -571,7 +661,7 @@ def extract_and_save(text: str, city_hint: str, source_url: str) -> bool:
     apply_address_city(store, city_hint, source_url)
 
     if not store.name or _is_invalid_business_name(store.name):
-        print(f"  [extract] Invalid or platform business name — skipping")
+        print("  [extract] Invalid or platform business name — skipping")
         return False
 
     store.source_url = source_url
@@ -594,8 +684,7 @@ def extract_and_save(text: str, city_hint: str, source_url: str) -> bool:
 
     if not store_meets_quality(store, source_url):
         print(
-            f"  [save] No address/phone/website — skipped "
-            f"(STORE_CONTACT_RULE={STORE_CONTACT_RULE})"
+            f"  [save] No address/phone/website — skipped (STORE_CONTACT_RULE={STORE_CONTACT_RULE})"
         )
         return False
 
@@ -615,6 +704,7 @@ def save_from_snippet(snippet: str, title: str, city_hint: str, url: str) -> boo
 
 # ── Main pipeline ──────────────────────────────────────────────────────────────
 
+
 def run_pipeline_for_city(city: str, category: str) -> int:
     """
     Full pipeline for one city + category combination.
@@ -624,7 +714,7 @@ def run_pipeline_for_city(city: str, category: str) -> int:
     results = search_for_city(category, city)
 
     if not results:
-        print(f"  No search results returned.")
+        print("  No search results returned.")
         return 0
 
     saved = 0
@@ -639,7 +729,7 @@ def run_pipeline_for_city(city: str, category: str) -> int:
         print(f"    {url[:80]}")
 
         if is_blocked_url(url) or is_yelp_search_or_list_page(url, title):
-            print(f"  [skip] Blocked or non-business URL")
+            print("  [skip] Blocked or non-business URL")
             continue
 
         if attempted >= MAX_RESULTS_PER_QUERY:
@@ -661,14 +751,14 @@ def run_pipeline_for_city(city: str, category: str) -> int:
         attempted += 1
         text = scrape(url)
         if not text:
-            print(f"  [skip] Scrape failed — no page content")
+            print("  [skip] Scrape failed — no page content")
             continue
         if is_diaspora_store_listing(url):
             text = enrich_diaspora_listing_text(url, text)
         if extract_and_save(text, city, url):
             saved += 1
         else:
-            print(f"  [skip] Extracted but not saved (filters or duplicate)")
+            print("  [skip] Extracted but not saved (filters or duplicate)")
 
     return saved
 
@@ -696,9 +786,9 @@ def run_full_pipeline():
     for city in TARGET_CITIES:
         for query in SEARCH_QUERIES:
             completed += 1
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"[{completed}/{total_tasks}] {query} in {city}")
-            print(f"{'='*60}")
+            print(f"{'=' * 60}")
             try:
                 saved = run_pipeline_for_city(city, query)
                 total_saved += saved

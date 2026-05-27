@@ -1,0 +1,5 @@
+# Dev tooling — install with: pip install -r requirements-dev.txt
+pre-commit>=4.0.0
+bandit[toml]>=1.8.0
+ruff>=0.9.0
+pip-audit>=2.7.0

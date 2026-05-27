@@ -38,13 +38,13 @@ from config import (
     get_llm,
     llm_config_summary,
 )
-from storage import init_db, get_stats
+from storage import get_stats, init_db
 from tools import get_all_tools
-
 
 # ── Agent state ────────────────────────────────────────────────────────────────
 # State is the single source of truth passed between every node in the graph.
 # Annotated[list, operator.add] means new messages are appended, not replaced.
+
 
 class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], operator.add]
@@ -77,6 +77,7 @@ Rules:
 
 # ── Graph nodes ────────────────────────────────────────────────────────────────
 
+
 def agent_node(state: AgentState) -> dict:
     """
     The reasoning node. LLM reads the current state and decides:
@@ -107,6 +108,7 @@ def should_continue(state: AgentState) -> str:
 
 
 # ── Graph construction ─────────────────────────────────────────────────────────
+
 
 def build_graph():
     """
@@ -158,8 +160,8 @@ def build_agent(use_checkpointing: bool = True):
     checkpointer = None
     if use_checkpointing and MONGODB_URI:
         try:
-            from pymongo import MongoClient
             from langgraph.checkpoint.mongodb import MongoDBSaver
+            from pymongo import MongoClient
 
             mongo_client = MongoClient(MONGODB_URI)
             checkpointer = MongoDBSaver(mongo_client)
@@ -174,6 +176,7 @@ def build_agent(use_checkpointing: bool = True):
 
 # ── Run helpers ────────────────────────────────────────────────────────────────
 
+
 def run_agent_for_city(app, city: str, category: str) -> dict:
     """
     Run one agent task: find stores of a given category in a given city.
@@ -182,6 +185,7 @@ def run_agent_for_city(app, city: str, category: str) -> dict:
     between city+category combinations.
     """
     import uuid
+
     thread_id = f"{city}-{category}-{uuid.uuid4().hex[:8]}"
 
     task = (
@@ -191,9 +195,9 @@ def run_agent_for_city(app, city: str, category: str) -> dict:
         f"Skip stores already in the database."
     )
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"TASK: {task}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     initial_state: AgentState = {
         "messages": [

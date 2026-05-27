@@ -133,8 +133,5 @@ def get_llm(*, json_mode: bool = False) -> BaseChatModel:
 def llm_config_summary() -> str:
     """Human-readable summary for logging and smoke tests."""
     if LLM_PROVIDER == "bedrock":
-        return (
-            f"provider=bedrock model={_active_bedrock_model_id()} "
-            f"region={AWS_REGION}"
-        )
+        return f"provider=bedrock model={_active_bedrock_model_id()} region={AWS_REGION}"
     return f"provider=ollama model={OLLAMA_MODEL} url={OLLAMA_BASE_URL}"

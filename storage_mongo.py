@@ -105,10 +105,13 @@ def get_stores_by_city(city: str) -> List[dict]:
 
 def store_exists(name: str, city: Optional[str]) -> bool:
     name_lower, city_lower = _keys(name, city)
-    return _get_collection().find_one(
-        {"name_lower": name_lower, "city_lower": city_lower},
-        {"_id": 1},
-    ) is not None
+    return (
+        _get_collection().find_one(
+            {"name_lower": name_lower, "city_lower": city_lower},
+            {"_id": 1},
+        )
+        is not None
+    )
 
 
 def get_stats() -> dict:
