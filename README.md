@@ -149,6 +149,8 @@ What runs:
 
 **GitHub:** `.github/workflows/security.yml` must pass before merging to `develop`. In repo settings → Branches → `develop` → add required status checks: `Pre-commit (secrets, bandit, ruff)`, `pip-audit (requirements.txt)`, and `Gitleaks (full history)`.
 
+CI uses the open-source [Gitleaks](https://github.com/gitleaks/gitleaks) CLI (no `GITLEAKS_LICENSE` secret). The third-party `gitleaks-action` requires a license for organization repos even if you add the secret — only use that action if you pass `GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}` in the step `env`.
+
 Dependabot opens weekly update PRs against `develop` (see `.github/dependabot.yml`).
 
 ### Optional — LangGraph agent mode
