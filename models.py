@@ -5,7 +5,6 @@
 # JSON that matches the schema, and Pydantic validates it automatically.
 # ─────────────────────────────────────────────────────────────────────────────
 
-from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -27,7 +26,7 @@ class StoreInfo(BaseModel):
         )
     )
 
-    region_focus: Optional[str] = Field(
+    region_focus: str | None = Field(
         default=None,
         description=(
             "African region the store specialises in, e.g. 'West African', "
@@ -35,21 +34,21 @@ class StoreInfo(BaseModel):
         ),
     )
 
-    address: Optional[str] = Field(default=None, description="Street address")
-    city: Optional[str] = Field(default=None, description="City")
-    province: Optional[str] = Field(default=None, description="Province or territory")
-    postal_code: Optional[str] = Field(default=None, description="Canadian postal code")
+    address: str | None = Field(default=None, description="Street address")
+    city: str | None = Field(default=None, description="City")
+    province: str | None = Field(default=None, description="Province or territory")
+    postal_code: str | None = Field(default=None, description="Canadian postal code")
 
-    phone: Optional[str] = Field(default=None, description="Phone number")
-    website: Optional[str] = Field(default=None, description="Website URL")
-    email: Optional[str] = Field(default=None, description="Email address")
+    phone: str | None = Field(default=None, description="Phone number")
+    website: str | None = Field(default=None, description="Website URL")
+    email: str | None = Field(default=None, description="Email address")
 
-    hours: Optional[str] = Field(default=None, description="Opening hours as a plain string")
+    hours: str | None = Field(default=None, description="Opening hours as a plain string")
 
     # FIX: description was `str` (required) but the LLM sometimes returns null,
     # causing a Pydantic ValidationError and dropping otherwise valid records.
     # Made Optional with a safe default so extraction never fails on this field.
-    description: Optional[str] = Field(
+    description: str | None = Field(
         default="An African store serving the local community.",
         description=(
             "A 2-3 sentence description of the store, its products, and its "
@@ -57,12 +56,12 @@ class StoreInfo(BaseModel):
         ),
     )
 
-    products_and_specialties: Optional[List[str]] = Field(
+    products_and_specialties: list[str] | None = Field(
         default=None,
         description="List of key products or specialties, e.g. ['Jollof rice', 'Egusi soup']",
     )
 
-    source_url: Optional[str] = Field(
+    source_url: str | None = Field(
         default=None, description="URL this information was extracted from"
     )
 

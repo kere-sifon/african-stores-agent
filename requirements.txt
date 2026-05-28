@@ -1,11 +1,11 @@
 # Core LangChain packages
 langchain>=0.3.0               # Core framework: chains, agents, prompts
 langchain-ollama>=0.2.0        # Ollama integration (ChatOllama)
-langchain-community>=0.3.0     # Community tools: DuckDuckGo, web loaders
-langchain-aws>=0.2.0           # AWS Bedrock (ChatBedrockConverse)
+langchain-community>=0.4.2     # Community tools: DuckDuckGo, web loaders
+langchain-aws>=1.5.0           # AWS Bedrock (ChatBedrockConverse)
 
 # LangGraph — production agent orchestration (replaces langchain_classic AgentExecutor)
-langgraph>=0.2.0               # StateGraph, ToolNode, conditional edges
+langgraph>=1.2.2               # StateGraph, ToolNode, conditional edges
 langgraph-checkpoint-mongodb>=0.1.0  # MongoDB checkpointer for resumable runs
 
 # AWS

@@ -1,7 +1,7 @@
 # Makefile — African Stores Canada Agent
 # Run `make help` to see all commands
 
-.PHONY: help setup setup-dev test crawl generate stats clean lint security pre-commit-install test-llm test-extract test-bedrock
+.PHONY: help setup setup-dev test crawl generate stats clean lint quality security pre-commit-install test-llm test-extract test-bedrock
 
 PYTHON := .venv/bin/python
 PIP    := .venv/bin/pip
@@ -18,7 +18,8 @@ help:
 	@echo "  make stats      Print database summary"
 	@echo "  make clean      Remove generated output and database"
 	@echo "  make lint       Run ruff linter"
-	@echo "  make security   Run all pre-commit security hooks"
+	@echo "  make quality    Ruff lint/format + Bandit SAST"
+	@echo "  make security   Run all pre-commit hooks (secrets + quality)"
 	@echo "  make pre-commit-install  Install git hooks (run once per clone)"
 	@echo "  make test-llm   Smoke-test get_llm() (Bedrock or Ollama)"
 	@echo "  make test-extract  Test extraction chain on fixture text"
@@ -107,6 +108,14 @@ lint:
 security:
 	@command -v pre-commit >/dev/null || { echo "Run: make setup-dev"; exit 1; }
 	pre-commit run --all-files
+
+quality:
+	@command -v ruff >/dev/null || $(PIP) install "ruff==0.9.6"
+	@command -v bandit >/dev/null || $(PIP) install "bandit[toml]==1.8.3"
+	ruff check .
+	ruff format --check .
+	bandit -r . -c pyproject.toml -ll
+	@echo "✅ Lint + SAST passed (run 'make security' for secrets + full pre-commit)"
 
 pre-commit-install:
 	@command -v pre-commit >/dev/null || { echo "Run: make setup-dev"; exit 1; }

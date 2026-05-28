@@ -20,7 +20,6 @@
 
 import re
 import time
-from typing import Optional
 from urllib.parse import unquote
 
 import requests
@@ -380,7 +379,7 @@ def is_scrapeable(url: str) -> bool:
 # ── Step 3: Scrape ─────────────────────────────────────────────────────────────
 
 
-def scrape(url: str, max_chars: int = 4000) -> Optional[str]:
+def scrape(url: str, max_chars: int = 4000) -> str | None:
     """
     Fetch and clean a page. Returns plain text or None on failure.
     Never raises — all errors return None so the pipeline continues.
@@ -428,7 +427,7 @@ def _is_invalid_business_name(name: str) -> bool:
     return any(invalid in lower for invalid in INVALID_BUSINESS_NAMES)
 
 
-def parse_listing_slug_hint(url: str) -> Optional[str]:
+def parse_listing_slug_hint(url: str) -> str | None:
     """Business name hint from diasporastores /stores/listing/slug/."""
     match = re.search(r"/stores/listing/([^/?]+)", url, re.IGNORECASE)
     if not match:
@@ -436,7 +435,7 @@ def parse_listing_slug_hint(url: str) -> Optional[str]:
     return match.group(1).replace("-", " ").strip()
 
 
-def infer_city_from_listing_slug(url: str, aliases: frozenset[str]) -> Optional[str]:
+def infer_city_from_listing_slug(url: str, aliases: frozenset[str]) -> str | None:
     """City token embedded in listing URL slug (e.g. ...-grocery-toronto)."""
     lower = url.lower()
     for alias in sorted(aliases, key=len, reverse=True):
@@ -457,7 +456,7 @@ def enrich_diaspora_listing_text(url: str, text: str) -> str:
     )
 
 
-def parse_maps_place_name(url: str) -> Optional[str]:
+def parse_maps_place_name(url: str) -> str | None:
     """Business name from /maps/place/Name+Here/... path segment."""
     match = re.search(r"/maps/place/([^/@?]+)", url)
     if not match:
@@ -490,7 +489,7 @@ def process_maps_place(title: str, snippet: str, url: str, city_hint: str) -> bo
     return extract_and_save(text, city_hint, url)
 
 
-def parse_yelp_slug_name(url: str) -> Optional[str]:
+def parse_yelp_slug_name(url: str) -> str | None:
     """Business name hint from /biz/slug-city segment."""
     match = re.search(r"/biz/([^/?]+)", url, re.IGNORECASE)
     if not match:
@@ -533,7 +532,7 @@ def process_yelp_listing(title: str, snippet: str, url: str, city_hint: str) -> 
     return extract_and_save(text, city_hint, url)
 
 
-def infer_city_from_address(address: str, aliases: frozenset[str]) -> Optional[str]:
+def infer_city_from_address(address: str, aliases: frozenset[str]) -> str | None:
     """Match a GTA (or search-area) city name embedded in a street address."""
     addr = address.lower()
     for alias in sorted(aliases, key=len, reverse=True):
