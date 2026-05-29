@@ -40,8 +40,23 @@ on:
         options:
           - agent
           - agent-full
+          - names
           - generate
           - smoke
+      store_names:
+        description: Store names (comma or newline separated). Required when mode=names.
+        required: false
+        type: string
+      city:
+        description: City for named store crawl
+        required: false
+        default: "Toronto, Ontario"
+        type: string
+      use_agent:
+        description: Use LangGraph agent for names mode (default is pipeline)
+        required: false
+        default: false
+        type: boolean
 
   schedule:
     # Weekly Sunday 6am ET (11:00 UTC) — agent test crawl (Toronto only)
@@ -169,6 +184,23 @@ jobs:
           print(f'✅ MongoDB OK — {s[\"total\"]} stores in database')
           "
 
+      # ── Named stores (manual seed list) ───────────────────────────────────────
+      - name: Run named store crawl
+        if: steps.mode.outputs.mode == 'names'
+        id: names_crawl
+        run: |
+          if [ -z "${{ inputs.store_names }}" ]; then
+            echo "::error::store_names input is required when mode=names"
+            exit 1
+          fi
+          printf '%s' "${{ inputs.store_names }}" > /tmp/store_names.txt
+          if [ "${{ inputs.use_agent }}" = "true" ]; then
+            python run.py --agent --names-file /tmp/store_names.txt --city "${{ inputs.city }}" 2>&1 | tee /tmp/crawl_output.txt
+          else
+            python run.py --names-file /tmp/store_names.txt --city "${{ inputs.city }}" 2>&1 | tee /tmp/crawl_output.txt
+          fi
+          python run.py --stats 2>&1 | tee -a /tmp/crawl_output.txt
+
       # ── Agent: Toronto test ───────────────────────────────────────────────────
       - name: Run LangGraph agent — Toronto test
         if: steps.mode.outputs.mode == 'agent'
@@ -228,7 +260,11 @@ jobs:
           city_summary = "\n".join(f"  • {city}: {count} stores" for city, count in city_lines)
 
           status_emoji = "✅" if status == "success" else "❌"
-          mode_label = "Toronto test" if mode == "agent" else "Full crawl (all cities)"
+          mode_label = {
+              "agent": "Toronto test",
+              "agent-full": "Full crawl (all cities)",
+              "names": "Named stores",
+          }.get(mode, mode)
 
           subject = f"{status_emoji} African Stores Crawl — {mode_label} ({status.upper()})"
 
