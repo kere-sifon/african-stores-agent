@@ -234,7 +234,7 @@ def run_agent_for_store_names(app, store_names: list[str], city: str) -> dict:
     task = (
         f"Find and save these specific African stores in {city}, Canada:\n{names_list}\n\n"
         f"For each store:\n"
-        f"1. Search using the exact store name plus city (e.g. \"Store Name\" Toronto)\n"
+        f'1. Search using the exact store name plus city (e.g. "Store Name" Toronto)\n'
         f"2. Scrape the best matching URL (Yelp, diasporastores, or store website)\n"
         f"3. check_store_exists before saving\n"
         f"4. save_store_to_db with extracted details\n"

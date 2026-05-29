@@ -57,14 +57,16 @@ def parse_store_names(names: str | None, names_file: str | None) -> list[str]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="African Stores Canada — crawl & directory")
     parser.add_argument("--full", action="store_true", help="Full pipeline crawl (all cities)")
-    parser.add_argument("--agent", action="store_true", help="Use LangGraph agent instead of pipeline")
+    parser.add_argument(
+        "--agent", action="store_true", help="Use LangGraph agent instead of pipeline"
+    )
     parser.add_argument("--agent-full", action="store_true", help="Agent full crawl")
     parser.add_argument("--generate", action="store_true", help="Generate HTML site from DB")
     parser.add_argument("--stats", action="store_true", help="Print database stats")
     parser.add_argument(
         "--names",
         metavar="NAMES",
-        help='Store names to crawl (comma, semicolon, or newline separated)',
+        help="Store names to crawl (comma, semicolon, or newline separated)",
     )
     parser.add_argument(
         "--names-file",
