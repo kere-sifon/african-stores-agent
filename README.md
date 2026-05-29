@@ -106,6 +106,23 @@ python run.py
 
 This runs a single city/category crawl using the **pipeline**.
 
+### Named store crawl (manual seed list)
+
+When you already know store names, skip broad search and crawl them directly:
+
+```bash
+# Pipeline (deterministic — recommended)
+python run.py --names "Grocery Africa, The South African Store" --city "Toronto, Ontario"
+
+# From a file (one name per line, # for comments)
+python run.py --names-file stores.txt --city "Toronto, Ontario"
+
+# LangGraph agent
+python run.py --agent --names "Planet African Market" --city "Toronto, Ontario"
+```
+
+**GitHub Actions:** Run workflow **Crawl directory** → mode **names** → paste store names in `store_names` → optional `use_agent` for agent mode.
+
 ### Step 2 — Full crawl
 
 ```bash

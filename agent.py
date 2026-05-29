@@ -223,6 +223,51 @@ def run_agent_for_city(app, city: str, category: str) -> dict:
     return result
 
 
+def run_agent_for_store_names(app, store_names: list[str], city: str) -> dict:
+    """
+    Run one agent task: find and save specific stores by name in a city.
+    """
+    import uuid
+
+    thread_id = f"names-{city}-{uuid.uuid4().hex[:8]}"
+    names_list = "\n".join(f"  - {name}" for name in store_names)
+    task = (
+        f"Find and save these specific African stores in {city}, Canada:\n{names_list}\n\n"
+        f"For each store:\n"
+        f"1. Search using the exact store name plus city (e.g. \"Store Name\" Toronto)\n"
+        f"2. Scrape the best matching URL (Yelp, diasporastores, or store website)\n"
+        f"3. check_store_exists before saving\n"
+        f"4. save_store_to_db with extracted details\n"
+        f"Skip stores already in the database. Stop after processing all names."
+    )
+
+    print(f"\n{'=' * 60}")
+    print(f"TASK: Named store crawl in {city}")
+    print(f"{'=' * 60}\n")
+
+    initial_state: AgentState = {
+        "messages": [
+            SystemMessage(content=SYSTEM_PROMPT),
+            HumanMessage(content=task),
+        ],
+        "city": city,
+        "category": "named stores",
+        "stores_saved": 0,
+    }
+
+    config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 80}
+
+    result = app.invoke(initial_state, config=config)
+
+    final_messages = result.get("messages", [])
+    if final_messages:
+        last = final_messages[-1]
+        if hasattr(last, "content") and last.content:
+            print(f"\n── Agent summary ──\n{last.content}")
+
+    return result
+
+
 def run_full_crawl():
     """Full crawl across all cities and categories using the LangGraph agent."""
     init_db()

@@ -704,6 +704,95 @@ def save_from_snippet(snippet: str, title: str, city_hint: str, url: str) -> boo
 # ── Main pipeline ──────────────────────────────────────────────────────────────
 
 
+def process_search_result(result: dict, city: str) -> bool:
+    """
+    Scrape/extract/save one search result URL.
+    Returns True if a store was saved.
+    """
+    url = result["url"]
+    title = result["title"]
+    snippet = result["snippet"]
+
+    print(f"\n  → {title[:60]}")
+    print(f"    {url[:80]}")
+
+    if is_blocked_url(url) or is_yelp_search_or_list_page(url, title):
+        print("  [skip] Blocked or non-business URL")
+        return False
+
+    if is_google_maps_place(url):
+        return process_maps_place(title, snippet, url, city)
+
+    if is_yelp_biz_page(url):
+        return process_yelp_listing(title, snippet, url, city)
+
+    text = scrape(url)
+    if not text:
+        print("  [skip] Scrape failed — no page content")
+        return False
+    if is_diaspora_store_listing(url):
+        text = enrich_diaspora_listing_text(url, text)
+    if extract_and_save(text, city, url):
+        return True
+    print("  [skip] Extracted but not saved (filters or duplicate)")
+    return False
+
+
+def search_for_store_name(store_name: str, city: str) -> list[dict]:
+    """Search DuckDuckGo for a specific business name in a city."""
+    city_name = city.split(",")[0].strip()
+    province = city.split(",")[1].strip() if "," in city else ""
+    query = f'"{store_name}" {city_name} {province} Canada'.strip()
+    print(f"  🔍 Store search: {query}")
+    results = search(query, num_results=8)
+    results = [
+        r
+        for r in results
+        if not is_blocked_url(r["url"])
+        and not is_yelp_search_or_list_page(r["url"], r.get("title", ""))
+    ]
+    results.sort(key=_result_sort_key)
+    print(f"  Found {len(results)} scrapeable URLs for {store_name!r}")
+    return results
+
+
+def run_pipeline_for_store_names(store_names: list[str], city: str) -> int:
+    """
+    Crawl a list of known store names (manual seed list).
+    For each name, search and try URLs until one saves or attempts are exhausted.
+    """
+    if not store_names:
+        print("  No store names provided.")
+        return 0
+
+    total_saved = 0
+    for store_name in store_names:
+        print(f"\n{'─' * 50}")
+        print(f"  📍 Store: {store_name}")
+        print(f"{'─' * 50}")
+        results = search_for_store_name(store_name, city)
+        if not results:
+            print(f"  [skip] No results for {store_name!r}")
+            continue
+
+        saved = False
+        attempted = 0
+        for result in results:
+            if attempted >= MAX_RESULTS_PER_QUERY:
+                print(f"  [skip] Reached max attempts ({MAX_RESULTS_PER_QUERY}) for {store_name!r}")
+                break
+            attempted += 1
+            if process_search_result(result, city):
+                total_saved += 1
+                saved = True
+                break
+
+        if not saved:
+            print(f"  [skip] Could not save {store_name!r}")
+
+    return total_saved
+
+
 def run_pipeline_for_city(city: str, category: str) -> int:
     """
     Full pipeline for one city + category combination.
@@ -720,46 +809,37 @@ def run_pipeline_for_city(city: str, category: str) -> int:
     attempted = 0
 
     for result in results:
-        url = result["url"]
-        title = result["title"]
-        snippet = result["snippet"]
-
-        print(f"\n  → {title[:60]}")
-        print(f"    {url[:80]}")
-
-        if is_blocked_url(url) or is_yelp_search_or_list_page(url, title):
-            print("  [skip] Blocked or non-business URL")
+        if is_blocked_url(result["url"]) or is_yelp_search_or_list_page(
+            result["url"], result.get("title", "")
+        ):
             continue
 
         if attempted >= MAX_RESULTS_PER_QUERY:
             print(f"  [skip] Reached max scrape attempts ({MAX_RESULTS_PER_QUERY})")
             break
 
-        if is_google_maps_place(url):
-            attempted += 1
-            if process_maps_place(title, snippet, url, city):
-                saved += 1
-            continue
-
-        if is_yelp_biz_page(url):
-            attempted += 1
-            if process_yelp_listing(title, snippet, url, city):
-                saved += 1
-            continue
-
         attempted += 1
-        text = scrape(url)
-        if not text:
-            print("  [skip] Scrape failed — no page content")
-            continue
-        if is_diaspora_store_listing(url):
-            text = enrich_diaspora_listing_text(url, text)
-        if extract_and_save(text, city, url):
+        if process_search_result(result, city):
             saved += 1
-        else:
-            print("  [skip] Extracted but not saved (filters or duplicate)")
 
     return saved
+
+
+def run_names_pipeline(
+    store_names: list[str],
+    city: str = "Toronto, Ontario",
+) -> None:
+    """Manual run: crawl specific store names in one city."""
+    from storage import storage_summary
+
+    init_db()
+    print(f"\n📋 Named store crawl in {city}")
+    print(f"   Stores: {', '.join(store_names)}")
+    print(f"   {storage_summary()}\n")
+    saved = run_pipeline_for_store_names(store_names, city)
+    print(f"\n✅ Done. Saved {saved} store(s) this run.")
+    stats = get_stats()
+    print(f"   Total in database: {stats['total']}")
 
 
 def run_test_pipeline(city: str = "Toronto, Ontario", category: str = "African grocery store"):
