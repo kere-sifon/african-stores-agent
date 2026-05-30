@@ -285,7 +285,7 @@ def run_agent_city_crawl(city: str) -> None:
             print(f"  [agent] Error on ({city}, {query}): {e} — continuing...")
 
     stats = get_stats()
-    print(f"\n✅ Agent city crawl complete.")
+    print("\n✅ Agent city crawl complete.")
     print(f"   New stores this run: {stats['total'] - total_saved_before}")
     print(f"   Total in database: {stats['total']}")
 
