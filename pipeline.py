@@ -855,6 +855,31 @@ def run_test_pipeline(city: str = "Toronto, Ontario", category: str = "African g
     print(f"   Total in database: {stats['total']}")
 
 
+def run_city_pipeline(city: str) -> None:
+    """Manual run: all search categories in one city."""
+    from storage import storage_summary
+
+    init_db()
+    print(f"\n🏙️  City crawl: {city}")
+    print(f"   Categories: {len(SEARCH_QUERIES)}")
+    print(f"   {storage_summary()}\n")
+
+    total_saved = 0
+    for i, query in enumerate(SEARCH_QUERIES, start=1):
+        print(f"\n{'=' * 60}")
+        print(f"[{i}/{len(SEARCH_QUERIES)}] {query} in {city}")
+        print(f"{'=' * 60}")
+        try:
+            saved = run_pipeline_for_city(city, query)
+            total_saved += saved
+        except Exception as e:
+            print(f"  [pipeline] Error: {e} — continuing...")
+
+    print(f"\n✅ City crawl complete. Saved {total_saved} store(s) this run.")
+    stats = get_stats()
+    print(f"   Total in database: {stats['total']}")
+
+
 def run_full_pipeline():
     """Full crawl across all cities and categories."""
     init_db()

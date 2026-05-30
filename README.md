@@ -123,6 +123,22 @@ python run.py --agent --names "Planet African Market" --city "Toronto, Ontario"
 
 **GitHub Actions:** Run workflow **Crawl directory** → mode **names** → paste store names in `store_names` → optional `use_agent` for agent mode.
 
+### City crawl (all categories in one city)
+
+Crawl every search category (grocery, restaurant, market, etc.) in a single city:
+
+```bash
+# Pipeline (recommended)
+python run.py --city-crawl --city "Montreal, Quebec"
+
+# LangGraph agent
+python run.py --agent --city-crawl --city "Calgary, Alberta"
+```
+
+**GitHub Actions:** mode **city** → set **city** to e.g. `Toronto, Ontario` → optional **use_agent**.
+
+Use `"City, Province"` format so city filters work correctly (e.g. `Niagara Falls, Ontario`).
+
 ### Step 2 — Full crawl
 
 ```bash

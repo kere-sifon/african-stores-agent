@@ -7,7 +7,8 @@
 #   python run.py --names "Store A, Store B" [--city "Toronto, Ontario"]
 #   python run.py --names-file stores.txt [--city "Toronto, Ontario"]
 #   python run.py --agent           single city test (LangGraph agent)
-#   python run.py --agent --names "Store A"   named store crawl (agent)
+#   python run.py --city-crawl --city "Montreal, Quebec"
+#   python run.py --agent --city-crawl --city "Montreal, Quebec"
 #   python run.py --agent-full      full crawl (LangGraph agent)
 #   python run.py --generate        build HTML site from DB
 #   python run.py --stats           print DB summary
@@ -74,9 +75,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="File with one store name per line (# comments allowed)",
     )
     parser.add_argument(
+        "--city-crawl",
+        action="store_true",
+        help="Crawl all store categories in the city given by --city",
+    )
+    parser.add_argument(
         "--city",
         default=DEFAULT_CITY,
-        help=f'City context for search (default: "{DEFAULT_CITY}")',
+        help=f'City for search (default: "{DEFAULT_CITY}") — use "City, Province"',
     )
     return parser
 
@@ -98,6 +104,18 @@ def run_names_pipeline(store_names: list[str], city: str) -> None:
     from pipeline import run_names_pipeline as pipeline_names
 
     pipeline_names(store_names, city)
+    generate()
+
+
+def run_city_crawl(city: str, use_agent: bool) -> None:
+    if use_agent:
+        from agent import run_agent_city_crawl
+
+        run_agent_city_crawl(city)
+    else:
+        from pipeline import run_city_pipeline
+
+        run_city_pipeline(city)
     generate()
 
 
@@ -159,6 +177,8 @@ def main() -> None:
         generate()
     elif args.agent_full:
         run_agent_full()
+    elif args.city_crawl:
+        run_city_crawl(args.city, use_agent=args.agent)
     elif args.agent:
         run_agent_test(store_names or None, args.city)
     elif args.full:

@@ -268,6 +268,28 @@ def run_agent_for_store_names(app, store_names: list[str], city: str) -> dict:
     return result
 
 
+def run_agent_city_crawl(city: str) -> None:
+    """All search categories in one city using the LangGraph agent."""
+    init_db()
+    print(f"[agent] LLM: {llm_config_summary()}")
+    print(f"[agent] City crawl: {city} ({len(SEARCH_QUERIES)} categories)\n")
+    app = build_agent()
+
+    total_saved_before = get_stats()["total"]
+
+    for i, query in enumerate(SEARCH_QUERIES, start=1):
+        print(f"\n[{i}/{len(SEARCH_QUERIES)}] City: {city} | Category: {query}")
+        try:
+            run_agent_for_city(app, city, query)
+        except Exception as e:
+            print(f"  [agent] Error on ({city}, {query}): {e} — continuing...")
+
+    stats = get_stats()
+    print(f"\n✅ Agent city crawl complete.")
+    print(f"   New stores this run: {stats['total'] - total_saved_before}")
+    print(f"   Total in database: {stats['total']}")
+
+
 def run_full_crawl():
     """Full crawl across all cities and categories using the LangGraph agent."""
     init_db()

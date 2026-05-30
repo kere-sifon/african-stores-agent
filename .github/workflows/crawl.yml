@@ -40,6 +40,7 @@ on:
         options:
           - agent
           - agent-full
+          - city
           - names
           - generate
           - smoke
@@ -48,12 +49,12 @@ on:
         required: false
         type: string
       city:
-        description: City for named store crawl
+        description: 'City to crawl — e.g. "Toronto, Ontario" (required for mode=city or names)'
         required: false
         default: "Toronto, Ontario"
         type: string
       use_agent:
-        description: Use LangGraph agent for names mode (default is pipeline)
+        description: Use LangGraph agent instead of pipeline (city / names modes)
         required: false
         default: false
         type: boolean
@@ -88,7 +89,8 @@ jobs:
     timeout-minutes: >-
       ${{ (github.event_name == 'schedule' && github.event.schedule == '0 8 1 * *') && 180 ||
           github.event_name == 'schedule' && 60 ||
-          inputs.mode == 'agent-full' && 180 || 60 }}
+          inputs.mode == 'agent-full' && 180 ||
+          inputs.mode == 'city' && 120 || 60 }}
 
     permissions:
       id-token: write
@@ -201,6 +203,22 @@ jobs:
           fi
           python run.py --stats 2>&1 | tee -a /tmp/crawl_output.txt
 
+      # ── City crawl (all categories in one city) ───────────────────────────────
+      - name: Run city crawl
+        if: steps.mode.outputs.mode == 'city'
+        id: city_crawl
+        run: |
+          if [ -z "${{ inputs.city }}" ]; then
+            echo "::error::city input is required when mode=city"
+            exit 1
+          fi
+          if [ "${{ inputs.use_agent }}" = "true" ]; then
+            python run.py --agent --city-crawl --city "${{ inputs.city }}" 2>&1 | tee /tmp/crawl_output.txt
+          else
+            python run.py --city-crawl --city "${{ inputs.city }}" 2>&1 | tee /tmp/crawl_output.txt
+          fi
+          python run.py --stats 2>&1 | tee -a /tmp/crawl_output.txt
+
       # ── Agent: Toronto test ───────────────────────────────────────────────────
       - name: Run LangGraph agent — Toronto test
         if: steps.mode.outputs.mode == 'agent'
@@ -242,6 +260,7 @@ jobs:
           import os, re
 
           mode    = "${{ steps.mode.outputs.mode }}"
+          city_in = "${{ inputs.city }}"
           status  = "${{ job.status }}"
           run_url = "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           trigger = "${{ github.event_name }}"
@@ -263,6 +282,7 @@ jobs:
           mode_label = {
               "agent": "Toronto test",
               "agent-full": "Full crawl (all cities)",
+              "city": f"City crawl ({city_in})" if city_in else "City crawl",
               "names": "Named stores",
           }.get(mode, mode)
 
