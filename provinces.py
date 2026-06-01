@@ -17,7 +17,7 @@ PROVINCE_CITIES: dict[str, list[str]] = {
         "Markham, Ontario",
         "Vaughan, Ontario",
         "Pickering, Ontario",
-        "Kingston, Ontario",    # add it here
+        "Kingston, Ontario",  
         "Waterloo, Ontario",
         "Guelph, Ontario",
         "Kitchener, Ontario",
