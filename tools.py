@@ -128,12 +128,17 @@ def save_store_to_db(store_json: str) -> str:
 
         # Skip if we already have this store
         if store_exists(store.name, store.city):
-            return f"Already in database: {store.name} ({store.city}) — skipped."
+            message = f"Already in database: {store.name} ({store.city}) — skipped."
+            print(f"  [save] {message}")
+            return message
 
         if not store_meets_quality(store, store.source_url or ""):
-            return "Skipped: needs address, phone, or store website."
+            message = "Skipped: needs address, phone, or store website."
+            print(f"  [save] {message}")
+            return message
 
-        success, message = save_store(store)
+        _success, message = save_store(store)
+        print(f"  [save] {message}")
         return message
     except json.JSONDecodeError as e:
         return f"Invalid JSON: {e}"
