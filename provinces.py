@@ -17,7 +17,7 @@ PROVINCE_CITIES: dict[str, list[str]] = {
         "Markham, Ontario",
         "Vaughan, Ontario",
         "Pickering, Ontario",
-        "Kingston, Ontario",  
+        "Kingston, Ontario",
         "Waterloo, Ontario",
         "Guelph, Ontario",
         "Kitchener, Ontario",
@@ -59,7 +59,6 @@ PROVINCE_CITIES: dict[str, list[str]] = {
         "Moncton, New Brunswick",
         "Saint John, New Brunswick",
         "Fredericton, New Brunswick",
-        
     ],
     "Prince Edward Island": ["Charlottetown, Prince Edward Island"],
     "Newfoundland": ["St. John's, Newfoundland"],

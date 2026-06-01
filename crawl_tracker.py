@@ -71,7 +71,10 @@ def record_province_crawl(
             {"$set": doc},
             upsert=True,
         )
-        print(f"  [crawl_tracker] Recorded crawl: {province} (week {week_number}/{year}, +{stores_saved} stores)")
+        print(
+            f"  [crawl_tracker] Recorded crawl: {province} "
+            f"(week {week_number}/{year}, +{stores_saved} stores)"
+        )
     except PyMongoError as e:
         print(f"  [crawl_tracker] Warning: failed to record crawl ({e})")
 
@@ -92,7 +95,7 @@ def get_crawl_coverage() -> list[dict]:
     """
     Return coverage summary for ALL provinces in PROVINCE_ROTATION.
     Each dict: {province, last_crawled_at, days_since_crawl, stores_saved}.
-  """
+    """
     from provinces import PROVINCE_ROTATION
 
     coll = _get_collection()
