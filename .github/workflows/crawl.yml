@@ -300,10 +300,34 @@ jobs:
           output_file = "/tmp/crawl_output.txt"
           output = open(output_file).read() if os.path.exists(output_file) else ""
 
-          saved  = len(re.findall(r"\[save\] Saved:", output))
-          skipped = len(re.findall(r"(?:skipped|Already exists)", output, re.IGNORECASE))
-          total_match = re.search(r"Total stores:\s*(\d+)", output)
-          total  = total_match.group(1) if total_match else "unknown"
+          def parse_saved(text: str) -> int:
+              # Province/agent summary from run.py (authoritative when present)
+              summary = re.search(r"\[crawl\] New stores saved:\s*(\d+)", text)
+              if summary:
+                  return int(summary.group(1))
+              # Per-save lines (pipeline + LangGraph agent via tools.py)
+              per_save = len(re.findall(r"\[save\] Saved:", text))
+              if per_save:
+                  return per_save
+              # Per-city agent totals (sum across multi-city province crawls)
+              city_totals = re.findall(r"New stores this run:\s*(\d+)", text)
+              if city_totals:
+                  return sum(int(n) for n in city_totals)
+              return 0
+
+          def parse_skipped(text: str) -> int:
+              return len(
+                  re.findall(
+                      r"\[save\].*(?:skipped|Already in database)",
+                      text,
+                      re.IGNORECASE,
+                  )
+              )
+
+          saved = parse_saved(output)
+          skipped = parse_skipped(output)
+          totals = re.findall(r"Total (?:stores|in database):\s*(\d+)", output)
+          total = totals[-1] if totals else "unknown"
 
           city_lines = re.findall(r"  (\w[\w\s]+):\s*(\d+) stores", output)
           city_summary = "\n".join(f"  • {city}: {count} stores" for city, count in city_lines)

@@ -13,6 +13,7 @@
 #   python run.py --province "Alberta"
 #   python run.py --province-weekly
 #   python run.py --province-schedule
+#   python run.py --reset-cycle
 #   python run.py --generate        build HTML site from DB
 #   python run.py --stats           print DB summary
 
@@ -104,6 +105,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the province rotation schedule and exit",
     )
+    parser.add_argument(
+        "--reset-cycle",
+        action="store_true",
+        help="Clear crawl history to start a fresh province rotation cycle",
+    )
     return parser
 
 
@@ -166,25 +172,81 @@ def run_province(province: str, run_id: str = "local") -> None:
     week = datetime.now().isocalendar()[1]
     record_province_crawl(canonical, saved, cities, week, run_id)
 
+    print(f"\n[crawl] Province crawl complete: {canonical}")
+    print(f"[crawl] New stores saved: {saved}")
+    print(f"[crawl] Total in database: {after}")
+
     print_stats()
     generate()
 
 
 def run_province_weekly() -> None:
-    """Determine and crawl this week's province automatically."""
-    from crawl_tracker import was_crawled_this_week
-    from provinces import get_province_for_week
+    """
+    Determine and crawl this week's province automatically.
+    Stops when all provinces have been crawled at least once (one full cycle).
+    """
+    from crawl_tracker import get_crawl_coverage, was_crawled_this_week
+    from provinces import PROVINCE_ROTATION, get_province_for_week
 
     week = datetime.now().isocalendar()[1]
     province = get_province_for_week(week)
 
+    # ── One-cycle guard ────────────────────────────────────────────────────
+    # If every province in PROVINCE_ROTATION has at least one crawl record,
+    # the full cycle is complete. Stop here — do not crawl anything.
+    coverage = get_crawl_coverage()
+    never_crawled = [r for r in coverage if r.get("last_crawled_at") is None]
+
+    if not never_crawled:
+        init_db()
+        total = get_stats()["total"]
+        print("✅ Full rotation cycle complete — all provinces crawled at least once.")
+        print(f"   Total stores in database: {total}")
+        print("   To start a new cycle:")
+        print("     python run.py --reset-cycle")
+        print("   Or trigger a manual province crawl from GitHub Actions (mode=province).")
+        # Write to crawl_output.txt so the email report reflects cycle completion
+        with open("/tmp/crawl_output.txt", "w") as f:  # noqa: S108  # nosec B108
+            f.write("Full rotation cycle complete — all 10 provinces crawled.\n")
+            f.write(f"Total stores in database: {total}\n")
+        return  # exit cleanly — workflow shows green, no crawl runs
+
+    # ── Duplicate-run guard ────────────────────────────────────────────────
     if was_crawled_this_week(province):
         print(f"⚠️  {province} already crawled this week — skipping")
         return
 
+    # ── Normal weekly crawl ────────────────────────────────────────────────
     run_id = os.getenv("GITHUB_RUN_ID", "local")
+    remaining = len(never_crawled)
+    total_provinces = len(PROVINCE_ROTATION)
     print(f"🗓️  Week {week} → {province}")
+    print(f"   Progress: {total_provinces - remaining + 1}/{total_provinces} provinces")
+    print(f"   Remaining after this run: {remaining - 1}")
     run_province(province, run_id=run_id)
+
+
+def reset_cycle() -> None:
+    """
+    Clear the crawl_history collection so the province rotation
+    starts a fresh cycle from the beginning next weekly run.
+    """
+    try:
+        from pymongo import MongoClient
+
+        from config import MONGODB_DB_NAME, MONGODB_URI
+
+        if not MONGODB_URI:
+            print("Error: MONGODB_URI is not set.")
+            return
+
+        client = MongoClient(MONGODB_URI)
+        result = client[MONGODB_DB_NAME]["crawl_history"].delete_many({})
+        print(f"✅ Cycle reset — {result.deleted_count} crawl record(s) cleared")
+        print("   The rotation will start from Ontario on the next weekly run.")
+        print("   Or trigger a specific province manually: python run.py --province 'Ontario'")
+    except Exception as e:
+        print(f"Error resetting cycle: {e}")
 
 
 def run_agent_test(store_names: list[str] | None, city: str) -> None:
@@ -245,6 +307,8 @@ def main() -> None:
         generate()
     elif args.agent_full:
         run_agent_full()
+    elif args.reset_cycle:
+        reset_cycle()
     elif args.province_schedule:
         from provinces import print_schedule
 
