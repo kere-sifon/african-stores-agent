@@ -10,14 +10,19 @@
 #   python run.py --city-crawl --city "Montreal, Quebec"
 #   python run.py --agent --city-crawl --city "Montreal, Quebec"
 #   python run.py --agent-full      full crawl (LangGraph agent)
+#   python run.py --province "Alberta"
+#   python run.py --province-weekly
+#   python run.py --province-schedule
 #   python run.py --generate        build HTML site from DB
 #   python run.py --stats           print DB summary
 
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from storage import get_stats, init_db
@@ -84,6 +89,21 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_CITY,
         help=f'City for search (default: "{DEFAULT_CITY}") — use "City, Province"',
     )
+    parser.add_argument(
+        "--province",
+        metavar="PROVINCE",
+        help='Crawl all cities in a province — e.g. "Alberta"',
+    )
+    parser.add_argument(
+        "--province-weekly",
+        action="store_true",
+        help="Automatically crawl this week's province per rotation schedule",
+    )
+    parser.add_argument(
+        "--province-schedule",
+        action="store_true",
+        help="Print the province rotation schedule and exit",
+    )
     return parser
 
 
@@ -117,6 +137,54 @@ def run_city_crawl(city: str, use_agent: bool) -> None:
 
         run_city_pipeline(city)
     generate()
+
+
+def run_province(province: str, run_id: str = "local") -> None:
+    """Crawl all cities in a province using the LangGraph agent."""
+    from agent import run_agent_city_crawl
+    from crawl_tracker import record_province_crawl
+    from provinces import PROVINCE_CITIES, get_cities_for_province
+
+    canonical = next(
+        (k for k in PROVINCE_CITIES if k.lower() == province.strip().lower()),
+        None,
+    )
+    cities = get_cities_for_province(province)
+    if not cities or canonical is None:
+        print(f"Error: unknown province {province!r}", file=sys.stderr)
+        sys.exit(1)
+
+    init_db()
+    before = get_stats()["total"]
+    print(f"\n🏙️  Province crawl: {canonical} ({len(cities)} cities)\n")
+
+    for city in cities:
+        run_agent_city_crawl(city)
+
+    after = get_stats()["total"]
+    saved = after - before
+    week = datetime.now().isocalendar()[1]
+    record_province_crawl(canonical, saved, cities, week, run_id)
+
+    print_stats()
+    generate()
+
+
+def run_province_weekly() -> None:
+    """Determine and crawl this week's province automatically."""
+    from crawl_tracker import was_crawled_this_week
+    from provinces import get_province_for_week
+
+    week = datetime.now().isocalendar()[1]
+    province = get_province_for_week(week)
+
+    if was_crawled_this_week(province):
+        print(f"⚠️  {province} already crawled this week — skipping")
+        return
+
+    run_id = os.getenv("GITHUB_RUN_ID", "local")
+    print(f"🗓️  Week {week} → {province}")
+    run_province(province, run_id=run_id)
 
 
 def run_agent_test(store_names: list[str] | None, city: str) -> None:
@@ -177,6 +245,14 @@ def main() -> None:
         generate()
     elif args.agent_full:
         run_agent_full()
+    elif args.province_schedule:
+        from provinces import print_schedule
+
+        print_schedule()
+    elif args.province_weekly:
+        run_province_weekly()
+    elif args.province:
+        run_province(args.province)
     elif args.city_crawl:
         run_city_crawl(args.city, use_agent=args.agent)
     elif args.agent:

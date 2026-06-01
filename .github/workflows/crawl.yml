@@ -24,8 +24,12 @@
 # Optional variables: AWS_REGION, BEDROCK_MODEL_ID, MONGODB_DB_NAME, MONGODB_COLLECTION
 #
 # Schedule:
-#   Weekly  — Sunday 6am ET  → agent test (Toronto only, ~10 min, ~$0.01)
-#   Monthly — 1st of month   → agent full (all 5 cities × 7 categories, ~45 min, ~$0.35)
+#   Weekly Sunday 6am ET — province rotation (one province per week)
+#   Full cycle: 10 provinces × 10 weeks = national coverage every 2.5 months
+#   34 cities covered across all provinces
+#   Monthly full crawl removed — province rotation is more thorough
+#
+#   agent-full kept as manual dispatch option for one-off full resets only
 
 name: Crawl directory
 
@@ -40,10 +44,17 @@ on:
         options:
           - agent
           - agent-full
+          - province-weekly
+          - province
           - city
           - names
           - generate
           - smoke
+      province:
+        description: 'Province name — e.g. "Alberta" (required for mode=province)'
+        required: false
+        default: ""
+        type: string
       store_names:
         description: Store names (comma or newline separated). Required when mode=names.
         required: false
@@ -60,10 +71,10 @@ on:
         type: boolean
 
   schedule:
-    # Weekly Sunday 6am ET (11:00 UTC) — agent test crawl (Toronto only)
+    # Weekly Sunday 6am ET (11:00 UTC) — province rotation
+    # Full cycle: 10 provinces × 1 week = national coverage every 10 weeks
+    # Covers 34 cities (vs 5 in the old monthly full crawl — removed)
     - cron: "0 11 * * 0"
-    # Monthly 1st of month 3am ET (08:00 UTC) — agent full crawl (all cities)
-    - cron: "0 8 1 * *"
 
 concurrency:
   group: directory-crawl-${{ github.ref }}
@@ -82,15 +93,15 @@ env:
 jobs:
   crawl:
     name: >-
-      ${{ github.event_name == 'schedule' &&
-        (github.event.schedule == '0 8 1 * *' && 'Scheduled agent full crawl (monthly)' || 'Scheduled agent test crawl (weekly)') ||
-        format('Manual crawl ({0})', inputs.mode) }}
+      ${{ github.event_name == 'schedule' && 'Scheduled province rotation (weekly)' ||
+          format('Manual crawl ({0})', inputs.mode) }}
     runs-on: ubuntu-latest
     timeout-minutes: >-
-      ${{ (github.event_name == 'schedule' && github.event.schedule == '0 8 1 * *') && 180 ||
-          github.event_name == 'schedule' && 60 ||
-          inputs.mode == 'agent-full' && 180 ||
-          inputs.mode == 'city' && 120 || 60 }}
+      ${{ inputs.mode == 'agent-full' && 180 ||
+          inputs.mode == 'province-weekly' && 120 ||
+          inputs.mode == 'province' && 120 ||
+          inputs.mode == 'city' && 120 ||
+          github.event_name == 'schedule' && 120 || 60 }}
 
     permissions:
       id-token: write
@@ -139,12 +150,8 @@ jobs:
         id: mode
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            SCHEDULE="${{ github.event.schedule }}"
-            if [ "$SCHEDULE" = "0 8 1 * *" ]; then
-              echo "mode=agent-full" >> "$GITHUB_OUTPUT"
-            else
-              echo "mode=agent" >> "$GITHUB_OUTPUT"
-            fi
+            # Weekly cron → province rotation (monthly cron removed)
+            echo "mode=province-weekly" >> "$GITHUB_OUTPUT"
           else
             echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
           fi
@@ -219,6 +226,28 @@ jobs:
           fi
           python run.py --stats 2>&1 | tee -a /tmp/crawl_output.txt
 
+      # ── Province rotation — weekly automatic ──────────────────────────────────
+      - name: Province rotation — weekly automatic
+        if: steps.mode.outputs.mode == 'province-weekly'
+        id: province_weekly
+        run: |
+          python run.py --province-weekly 2>&1 | tee /tmp/crawl_output.txt
+          python run.py --generate
+          python run.py --stats 2>&1 | tee -a /tmp/crawl_output.txt
+
+      # ── Province crawl — specific province ────────────────────────────────────
+      - name: Province crawl — manual
+        if: steps.mode.outputs.mode == 'province'
+        id: province_crawl
+        run: |
+          if [ -z "${{ inputs.province }}" ]; then
+            echo "::error::province input is required when mode=province"
+            exit 1
+          fi
+          python run.py --province "${{ inputs.province }}" 2>&1 | tee /tmp/crawl_output.txt
+          python run.py --generate
+          python run.py --stats 2>&1 | tee -a /tmp/crawl_output.txt
+
       # ── Agent: Toronto test ───────────────────────────────────────────────────
       - name: Run LangGraph agent — Toronto test
         if: steps.mode.outputs.mode == 'agent'
@@ -261,6 +290,7 @@ jobs:
 
           mode    = "${{ steps.mode.outputs.mode }}"
           city_in = "${{ inputs.city }}"
+          province_in = "${{ inputs.province }}"
           status  = "${{ job.status }}"
           run_url = "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           trigger = "${{ github.event_name }}"
@@ -278,10 +308,31 @@ jobs:
           city_lines = re.findall(r"  (\w[\w\s]+):\s*(\d+) stores", output)
           city_summary = "\n".join(f"  • {city}: {count} stores" for city, count in city_lines)
 
+          # Detect province for province-weekly and province modes
+          province_label = ""
+          if mode == "province-weekly":
+              province_match = re.search(r"🗓️\s+Week \d+ → (.+)", output)
+              if province_match:
+                  province_label = province_match.group(1).strip()
+              else:
+                  # Fallback: derive from week number
+                  import datetime
+                  week = datetime.datetime.now().isocalendar()[1]
+                  province_label = f"Week {week} (province unavailable)"
+          elif mode == "province":
+              province_label = "${{ inputs.province }}"
+
+          province_section = (
+              f"PROVINCE\n{'─'*30}\n  {province_label}\n\n"
+              if province_label else ""
+          )
+
           status_emoji = "✅" if status == "success" else "❌"
           mode_label = {
               "agent": "Toronto test",
               "agent-full": "Full crawl (all cities)",
+              "province-weekly": "Province rotation (weekly)",
+              "province": f"Province crawl ({province_in})" if province_in else "Province crawl",
               "city": f"City crawl ({city_in})" if city_in else "City crawl",
               "names": "Named stores",
           }.get(mode, mode)
@@ -301,7 +352,7 @@ jobs:
           Duplicates skipped: {skipped}
           Total in database:  {total}
 
-          BY CITY
+          {province_section}BY CITY
           {'─'*30}
           {city_summary or '  (no city breakdown available)'}
 
