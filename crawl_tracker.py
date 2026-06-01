@@ -13,11 +13,23 @@ from config import MONGODB_DB_NAME, MONGODB_URI
 CRAWL_HISTORY_COLLECTION = "crawl_history"
 
 _client: MongoClient | None = None
-_indexes_ensured = False
+
+
+def _ensure_indexes(coll: Collection) -> None:
+    """Create crawl_history indexes (idempotent — safe to call on every access)."""
+    try:
+        coll.create_index(
+            [("province", ASCENDING), ("year", ASCENDING), ("week_number", ASCENDING)],
+            unique=True,
+            name="uniq_province_year_week",
+        )
+        coll.create_index([("province", ASCENDING), ("last_crawled_at", ASCENDING)])
+    except PyMongoError as e:
+        print(f"  [crawl_tracker] Warning: index creation failed ({e})")
 
 
 def _get_collection() -> Collection | None:
-    global _client, _indexes_ensured
+    global _client
     if not MONGODB_URI:
         print("  [crawl_tracker] Warning: MONGODB_URI not set — tracker disabled")
         return None
@@ -25,14 +37,7 @@ def _get_collection() -> Collection | None:
         if _client is None:
             _client = MongoClient(MONGODB_URI)
         coll = _client[MONGODB_DB_NAME][CRAWL_HISTORY_COLLECTION]
-        if not _indexes_ensured:
-            coll.create_index(
-                [("province", ASCENDING), ("year", ASCENDING), ("week_number", ASCENDING)],
-                unique=True,
-                name="uniq_province_year_week",
-            )
-            coll.create_index([("province", ASCENDING), ("last_crawled_at", ASCENDING)])
-            _indexes_ensured = True
+        _ensure_indexes(coll)
         return coll
     except PyMongoError as e:
         print(f"  [crawl_tracker] Warning: MongoDB connection failed ({e})")
