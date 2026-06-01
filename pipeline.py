@@ -20,7 +20,7 @@
 
 import re
 import time
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -254,8 +254,10 @@ def is_yelp_search_or_list_page(url: str, title: str = "") -> bool:
 
 def is_diaspora_store_listing(url: str) -> bool:
     """Single-store page on diasporastores.ca (not blog/listicle)."""
-    lower = url.lower()
-    return "diasporastores.ca" in lower and "/stores/listing/" in lower
+    return (
+        _host_matches_domain(_url_host(url), "diasporastores.ca")
+        and "/stores/listing/" in url.lower()
+    )
 
 
 def search_for_city(category: str, city: str) -> list[dict]:
@@ -354,22 +356,42 @@ def _result_sort_key(row: dict) -> tuple[int, int]:
 # ── Step 2: Filter URLs ────────────────────────────────────────────────────────
 
 
+def _url_host(url: str) -> str:
+    """Return lowercase hostname from a URL, or empty string if unparseable."""
+    try:
+        return (urlparse(url.strip()).hostname or "").lower()
+    except Exception:
+        return ""
+
+
+def _host_matches_domain(host: str, domain: str) -> bool:
+    """True if host equals domain or is a subdomain of domain."""
+    if not host or not domain:
+        return False
+    domain = domain.lower()
+    return host == domain or host.endswith("." + domain)
+
+
 def is_blocked_url(url: str) -> bool:
     """Block junk domains; allow Yelp /biz/, Maps /place/, diaspora store listings."""
-    lower = url.lower()
     if is_google_maps_place(url):
         return False
     if is_yelp_biz_page(url):
         return False
-    if "yelp." in lower:
+
+    host = _url_host(url)
+
+    if host and (_host_matches_domain(host, "yelp.ca") or _host_matches_domain(host, "yelp.com")):
         return True
     if is_diaspora_store_listing(url):
         return False
-    if "diasporastores.ca" in lower:
+    if host and _host_matches_domain(host, "diasporastores.ca"):
         return True
-    if "google.com" in lower or "google.ca" in lower or "maps.google." in lower:
+    if host and (
+        _host_matches_domain(host, "google.com") or _host_matches_domain(host, "google.ca")
+    ):
         return True
-    return any(domain in lower for domain in BLOCKED_DOMAINS)
+    return any(_host_matches_domain(host, domain) for domain in BLOCKED_DOMAINS)
 
 
 def is_scrapeable(url: str) -> bool:
