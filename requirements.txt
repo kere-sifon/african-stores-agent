@@ -6,7 +6,7 @@ langchain-aws>=1.5.0           # AWS Bedrock (ChatBedrockConverse)
 
 # LangGraph — production agent orchestration (replaces langchain_classic AgentExecutor)
 langgraph>=1.2.2               # StateGraph, ToolNode, conditional edges
-langgraph-checkpoint-mongodb>=0.1.0  # MongoDB checkpointer for resumable runs
+langgraph-checkpoint-mongodb>=0.4.0  # MongoDB checkpointer for resumable runs
 
 # AWS
 boto3>=1.35.0
