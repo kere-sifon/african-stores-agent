@@ -135,9 +135,15 @@ def run_names_pipeline(store_names: list[str], city: str) -> None:
 
 def run_city_crawl(city: str, use_agent: bool) -> None:
     if use_agent:
-        from agent import run_agent_city_crawl
+        from config import SEARCH_QUERIES
+        from supervisor import build_supervisor_agent, run_supervisor_for_city
 
-        run_agent_city_crawl(city)
+        app = build_supervisor_agent()
+        for category in SEARCH_QUERIES:
+            try:
+                run_supervisor_for_city(app, city, category)
+            except Exception as e:
+                print(f"  [supervisor] Error on ({city}, {category}): {e} — continuing...")
     else:
         from pipeline import run_city_pipeline
 
@@ -146,10 +152,11 @@ def run_city_crawl(city: str, use_agent: bool) -> None:
 
 
 def run_province(province: str, run_id: str = "local") -> None:
-    """Crawl all cities in a province using the LangGraph agent."""
-    from agent import run_agent_city_crawl
+    """Crawl all cities in a province using the multi-agent supervisor."""
+    from config import SEARCH_QUERIES
     from crawl_tracker import record_province_crawl
     from provinces import PROVINCE_CITIES, get_cities_for_province
+    from supervisor import build_supervisor_agent, run_supervisor_for_city
 
     canonical = next(
         (k for k in PROVINCE_CITIES if k.lower() == province.strip().lower()),
@@ -162,10 +169,15 @@ def run_province(province: str, run_id: str = "local") -> None:
 
     init_db()
     before = get_stats()["total"]
-    print(f"\n🏙️  Province crawl: {canonical} ({len(cities)} cities)\n")
+    print(f"\n🏙️  Province crawl: {canonical} ({len(cities)} cities) [supervisor]\n")
 
+    app = build_supervisor_agent()
     for city in cities:
-        run_agent_city_crawl(city)
+        for category in SEARCH_QUERIES:
+            try:
+                run_supervisor_for_city(app, city, category)
+            except Exception as e:
+                print(f"  [supervisor] Error on ({city}, {category}): {e} — continuing...")
 
     after = get_stats()["total"]
     saved = after - before
@@ -250,29 +262,45 @@ def reset_cycle() -> None:
 
 
 def run_agent_test(store_names: list[str] | None, city: str) -> None:
-    from agent import build_agent, run_agent_for_city, run_agent_for_store_names
     from config import llm_config_summary
+    from supervisor import build_supervisor_agent, run_supervisor_for_city
 
     init_db()
-    app = build_agent()
+    app = build_supervisor_agent()
 
     if store_names:
-        print(f"🤖 LangGraph agent — named stores in {city}")
+        print(f"🤖 Supervisor — named stores in {city}")
         print(f"   LLM: {llm_config_summary()}\n")
-        run_agent_for_store_names(app, store_names, city)
+        for name in store_names:
+            try:
+                run_supervisor_for_city(app, city, name)
+            except Exception as e:
+                print(f"  [supervisor] Error on {name}: {e} — continuing...")
     else:
-        print("🤖 LangGraph agent test: African grocery stores in Toronto")
+        print("🤖 Supervisor agent test: African grocery stores in Toronto")
         print(f"   LLM: {llm_config_summary()}\n")
-        run_agent_for_city(app, city, "African grocery store")
+        run_supervisor_for_city(app, city, "African grocery store")
 
     print_stats()
     generate()
 
 
 def run_agent_full():
-    from agent import run_full_crawl
+    from config import SEARCH_QUERIES, TARGET_CITIES
+    from supervisor import build_supervisor_agent, run_supervisor_for_city
 
-    run_full_crawl()
+    init_db()
+    app = build_supervisor_agent()
+    total = len(TARGET_CITIES) * len(SEARCH_QUERIES)
+    completed = 0
+    for city in TARGET_CITIES:
+        for category in SEARCH_QUERIES:
+            completed += 1
+            print(f"\n[{completed}/{total}] city={city} | category={category}")
+            try:
+                run_supervisor_for_city(app, city, category)
+            except Exception as e:
+                print(f"  [supervisor] Error on ({city}, {category}): {e} \u2014 continuing...")
     generate()
 
 
