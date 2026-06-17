@@ -1,5 +1,5 @@
 # Core LangChain packages
-langchain>=0.3.0               # Core framework: chains, agents, prompts
+langchain>=1.3.4               # Core framework: chains, agents, prompts
 langchain-ollama>=0.2.0        # Ollama integration (ChatOllama)
 langchain-community>=0.4.2     # Community tools: DuckDuckGo, web loaders
 langchain-aws>=1.5.0           # AWS Bedrock (ChatBedrockConverse)
