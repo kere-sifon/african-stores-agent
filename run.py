@@ -135,8 +135,8 @@ def run_names_pipeline(store_names: list[str], city: str) -> None:
 
 def run_city_crawl(city: str, use_agent: bool) -> None:
     if use_agent:
-        from supervisor import build_supervisor_agent, run_supervisor_for_city
         from config import SEARCH_QUERIES
+        from supervisor import build_supervisor_agent, run_supervisor_for_city
 
         app = build_supervisor_agent()
         for category in SEARCH_QUERIES:
@@ -153,10 +153,10 @@ def run_city_crawl(city: str, use_agent: bool) -> None:
 
 def run_province(province: str, run_id: str = "local") -> None:
     """Crawl all cities in a province using the multi-agent supervisor."""
+    from config import SEARCH_QUERIES
     from crawl_tracker import record_province_crawl
     from provinces import PROVINCE_CITIES, get_cities_for_province
     from supervisor import build_supervisor_agent, run_supervisor_for_city
-    from config import SEARCH_QUERIES
 
     canonical = next(
         (k for k in PROVINCE_CITIES if k.lower() == province.strip().lower()),
@@ -262,8 +262,8 @@ def reset_cycle() -> None:
 
 
 def run_agent_test(store_names: list[str] | None, city: str) -> None:
+    from config import llm_config_summary
     from supervisor import build_supervisor_agent, run_supervisor_for_city
-    from config import llm_config_summary, SEARCH_QUERIES
 
     init_db()
     app = build_supervisor_agent()
@@ -286,8 +286,8 @@ def run_agent_test(store_names: list[str] | None, city: str) -> None:
 
 
 def run_agent_full():
+    from config import SEARCH_QUERIES, TARGET_CITIES
     from supervisor import build_supervisor_agent, run_supervisor_for_city
-    from config import TARGET_CITIES, SEARCH_QUERIES
 
     init_db()
     app = build_supervisor_agent()

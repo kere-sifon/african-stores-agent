@@ -219,7 +219,7 @@ def print_eval_report(scores: dict) -> None:
     print("  PER-AGENT EVALUATION REPORT")
     print("=" * 55)
     print(f"  Search Precision          {s.get('search_precision', 0):.3f}")
-    print(f"    (signal chunks / total scraped chunks)")
+    print("    (signal chunks / total scraped chunks)")
 
     print(f"\n  Validator Accuracy        {s.get('validator_accuracy', 0):.3f}")
     v = scores.get("validator", {})
@@ -230,8 +230,10 @@ def print_eval_report(scores: dict) -> None:
 
     print(f"\n  Storage New-Insert Rate   {s.get('storage_new_insert_rate', 0):.3f}")
     st = scores.get("storage", {})
-    print(f"    new={st.get('new_inserts',0)}  dup={st.get('duplicates',0)}  "
-          f"skip={st.get('skipped',0)}  err={st.get('errors',0)}")
+    print(
+        f"    new={st.get('new_inserts', 0)}  dup={st.get('duplicates', 0)}  "
+        f"skip={st.get('skipped', 0)}  err={st.get('errors', 0)}"
+    )
 
     print(f"\n  Total Saved This Run      {s.get('total_saved', 0)}")
     print(f"  Pipeline Errors           {s.get('total_errors', 0)}")
