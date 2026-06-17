@@ -97,15 +97,23 @@ def test_tool_boundaries() -> bool:
         assert "search_for_stores" in search_tools, "SearchAgent missing search_for_stores"
         assert "scrape_page" in search_tools, "SearchAgent missing scrape_page"
         assert "save_store_to_db" not in search_tools, "SearchAgent must NOT have save_store_to_db"
-        assert "check_store_exists" not in search_tools, "SearchAgent must NOT have check_store_exists"
+        assert "check_store_exists" not in search_tools, (
+            "SearchAgent must NOT have check_store_exists"
+        )
 
         assert "check_store_exists" in validator_tools, "ValidatorAgent missing check_store_exists"
-        assert "save_store_to_db" not in validator_tools, "ValidatorAgent must NOT have save_store_to_db"
-        assert "search_for_stores" not in validator_tools, "ValidatorAgent must NOT have search_for_stores"
+        assert "save_store_to_db" not in validator_tools, (
+            "ValidatorAgent must NOT have save_store_to_db"
+        )
+        assert "search_for_stores" not in validator_tools, (
+            "ValidatorAgent must NOT have search_for_stores"
+        )
 
         assert "save_store_to_db" in storage_tools, "StorageAgent missing save_store_to_db"
         assert "get_database_stats" in storage_tools, "StorageAgent missing get_database_stats"
-        assert "search_for_stores" not in storage_tools, "StorageAgent must NOT have search_for_stores"
+        assert "search_for_stores" not in storage_tools, (
+            "StorageAgent must NOT have search_for_stores"
+        )
         assert "scrape_page" not in storage_tools, "StorageAgent must NOT have scrape_page"
 
         logger.info("✓ Tool boundaries correct")
@@ -137,39 +145,60 @@ def test_supervisor_routing() -> bool:
         {
             "name": "empty state → search",
             "state": {
-                "city": "Toronto", "category": "grocery",
-                "search_results": [], "validated_stores": [],
-                "saved_count": 0, "errors": [], "messages": [], "next": "", "validator_attempted": False,
+                "city": "Toronto",
+                "category": "grocery",
+                "search_results": [],
+                "validated_stores": [],
+                "saved_count": 0,
+                "errors": [],
+                "messages": [],
+                "next": "",
+                "validator_attempted": False,
             },
             "expected": "search",
         },
         {
             "name": "has search results → validate",
             "state": {
-                "city": "Toronto", "category": "grocery",
+                "city": "Toronto",
+                "category": "grocery",
                 "search_results": ["some scraped text with a store"],
                 "validated_stores": [],
-                "saved_count": 0, "errors": [], "messages": [], "next": "", "validator_attempted": False,
+                "saved_count": 0,
+                "errors": [],
+                "messages": [],
+                "next": "",
+                "validator_attempted": False,
             },
             "expected": "validate",
         },
         {
             "name": "has validated stores → storage",
             "state": {
-                "city": "Toronto", "category": "grocery",
+                "city": "Toronto",
+                "category": "grocery",
                 "search_results": ["some text"],
                 "validated_stores": ['{"name": "Lagos Market", "city": "Toronto"}'],
-                "saved_count": 0, "errors": [], "messages": [], "next": "", "validator_attempted": True,
+                "saved_count": 0,
+                "errors": [],
+                "messages": [],
+                "next": "",
+                "validator_attempted": True,
             },
             "expected": "storage",
         },
         {
             "name": "saved_count > 0 → END",
             "state": {
-                "city": "Toronto", "category": "grocery",
+                "city": "Toronto",
+                "category": "grocery",
                 "search_results": ["some text"],
                 "validated_stores": ['{"name": "Lagos Market", "city": "Toronto"}'],
-                "saved_count": 2, "errors": [], "messages": [], "next": "", "validator_attempted": True,
+                "saved_count": 2,
+                "errors": [],
+                "messages": [],
+                "next": "",
+                "validator_attempted": True,
             },
             "expected": "END",
         },
@@ -178,12 +207,17 @@ def test_supervisor_routing() -> bool:
             # supervisor must abort to END, not retry search forever
             "name": "empty search + errors → END (infra failure)",
             "state": {
-                "city": "Toronto", "category": "grocery",
+                "city": "Toronto",
+                "category": "grocery",
                 "search_results": [],
                 "validated_stores": [],
                 "saved_count": 0,
-                "errors": ["SearchAgent error: UnrecognizedClientException — security token invalid"],
-                "messages": [], "next": "", "validator_attempted": False,
+                "errors": [
+                    "SearchAgent error: UnrecognizedClientException — security token invalid"
+                ],
+                "messages": [],
+                "next": "",
+                "validator_attempted": False,
             },
             "expected": "END",
         },
@@ -193,12 +227,15 @@ def test_supervisor_routing() -> bool:
             # sending noise to the Validator.
             "name": "search content + errors → END (dead end)",
             "state": {
-                "city": "Toronto", "category": "grocery",
+                "city": "Toronto",
+                "category": "grocery",
                 "search_results": ["HTTP error scraping url: 403", "Error scraping url: timeout"],
                 "validated_stores": [],
                 "saved_count": 0,
                 "errors": ["SearchAgent error: all scrapes failed"],
-                "messages": [], "next": "", "validator_attempted": False,
+                "messages": [],
+                "next": "",
+                "validator_attempted": False,
             },
             "expected": "END",
         },
@@ -206,12 +243,14 @@ def test_supervisor_routing() -> bool:
             # validator ran but found nothing → must END, not loop back to validate
             "name": "validator ran, found nothing → END (no valid stores)",
             "state": {
-                "city": "Toronto", "category": "grocery",
+                "city": "Toronto",
+                "category": "grocery",
                 "search_results": ["some scraped text"],
                 "validated_stores": [],
                 "saved_count": 0,
                 "errors": [],
-                "messages": [], "next": "",
+                "messages": [],
+                "next": "",
                 "validator_attempted": True,
             },
             "expected": "END",
@@ -224,10 +263,7 @@ def test_supervisor_routing() -> bool:
         actual = result.get("next")
         passed = actual == case["expected"]
         status = "✓" if passed else "✗"
-        logger.info(
-            "%s %s → got=%s expected=%s",
-            status, case["name"], actual, case["expected"]
-        )
+        logger.info("%s %s → got=%s expected=%s", status, case["name"], actual, case["expected"])
         if not passed:
             all_passed = False
 
@@ -247,9 +283,9 @@ def test_integration(city: str, category: str) -> bool:
     logger.info("── Stage 3: Integration test ──")
     logger.info("city=%s | category=%s | db=%s", city, category, os.getenv("MONGODB_DB_NAME"))
 
+    from eval_agents import evaluate_run, print_eval_report
     from storage import init_db
     from supervisor import build_supervisor_agent, run_supervisor_for_city
-    from eval_agents import evaluate_run, print_eval_report
 
     init_db()
     app = build_supervisor_agent(use_checkpointing=True)
@@ -294,8 +330,10 @@ def test_eval_module() -> bool:
 
     # Validator accuracy: 2 valid, 1 missing contact
     validated = [
-        '{"name": "Lagos Market", "city": "Toronto", "phone": "416-555-1234", "category": "Grocery"}',
-        '{"name": "Naija Foods", "city": "Toronto", "address": "45 Jane St", "category": "Restaurant"}',
+        '{"name": "Lagos Market", "city": "Toronto", "phone": "416-555-1234",'
+        ' "category": "Grocery"}',
+        '{"name": "Naija Foods", "city": "Toronto", "address": "45 Jane St",'
+        ' "category": "Restaurant"}',
         '{"name": "Unknown Store", "city": "Toronto"}',  # missing contact → invalid
     ]
     va = evaluate_validator_accuracy(validated)

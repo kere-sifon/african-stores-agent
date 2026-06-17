@@ -75,9 +75,9 @@ class AgentState(TypedDict):
 
     # Handoff channels (each specialist appends to its output channel)
     messages: Annotated[list[BaseMessage], operator.add]
-    search_results: Annotated[list[str], operator.add]      # raw text from SearchAgent
-    validated_stores: Annotated[list[str], operator.add]    # JSON strings from ValidatorAgent
-    errors: Annotated[list[str], operator.add]              # non-fatal errors from any agent
+    search_results: Annotated[list[str], operator.add]  # raw text from SearchAgent
+    validated_stores: Annotated[list[str], operator.add]  # JSON strings from ValidatorAgent
+    errors: Annotated[list[str], operator.add]  # non-fatal errors from any agent
 
     # Mutable counters (supervisor updates these)
     saved_count: int
@@ -89,16 +89,18 @@ class AgentState(TypedDict):
 
 # ── Supervisor prompts ─────────────────────────────────────────────────────────
 
-SUPERVISOR_SYSTEM = """You are the orchestration supervisor for the African Stores Canada cataloguing system.
+SUPERVISOR_SYSTEM = """You are the orchestration supervisor for the African Stores Canada
+cataloguing system.
 
-You receive a task (find African stores in a city) and route it through three specialist agents in sequence:
+You receive a task (find African stores in a city) and route it through
+three specialist agents in sequence:
 1. search  — finds stores via web search and scraping
 2. validate — checks each result against quality criteria and deduplication
 3. storage — saves validated stores to MongoDB
 
 Your routing decisions:
 - If search_results is empty → route to "search"
-- If search_results has data but validated_stores is empty → route to "validate"  
+- If search_results has data but validated_stores is empty → route to "validate"
 - If validated_stores has stores ready to save → route to "storage"
 - If storage has completed (saved_count > 0 or validated_stores is exhausted) → route to "END"
 - If search returned nothing and retries are exhausted → route to "END"
@@ -192,7 +194,8 @@ def supervisor_node(state: AgentState) -> dict:
     elif not search_results and errors:
         decision = "END"
         logger.info(
-            "SUPERVISOR DECISION → %s (reason: search_results empty after errors=%s — infra failure, aborting)",
+            "SUPERVISOR DECISION → %s (reason: search_results empty after errors=%s"
+            " — infra failure, aborting)",
             decision,
             errors,
         )
@@ -210,7 +213,8 @@ def supervisor_node(state: AgentState) -> dict:
     elif search_results and not validated_stores and validator_attempted:
         decision = "END"
         logger.info(
-            "SUPERVISOR DECISION → %s (reason: validator ran but found no valid stores — city/category exhausted)",
+            "SUPERVISOR DECISION → %s (reason: validator ran but found no valid stores"
+            " — city/category exhausted)",
             decision,
         )
 
