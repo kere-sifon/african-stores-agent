@@ -23,12 +23,17 @@ african_stores.db
 
 # Env
 .env
+.env.dev.local
+.env*.local
+.env.dev
+.env.dev.local
 
 # AI / project context (local only)
 PROMPT.md
 SKILLS.md
 TODO.md
 ARCHITECTURE.md
+.cursor/
 
 # IAM policy templates (configure in AWS console — do not commit)
 docs/bedrock-iam-policy.json
