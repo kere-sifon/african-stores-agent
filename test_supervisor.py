@@ -255,6 +255,28 @@ def test_supervisor_routing() -> bool:
             },
             "expected": "END",
         },
+        {
+            # Regression test: storage already ran once but saved_count stayed
+            # at 0 (all duplicates, or save calls silently failed against a
+            # weak local LLM's tool-calling). Without storage_attempted, the
+            # supervisor would route back to "storage" forever until
+            # recursion_limit=25 — this must END instead, accepting the
+            # outcome after one attempt, same as the validator pattern.
+            "name": "storage ran, saved nothing → END (not infinite retry)",
+            "state": {
+                "city": "Toronto",
+                "category": "grocery",
+                "search_results": ["some text"],
+                "validated_stores": ['{"name": "Lagos Market", "city": "Toronto"}'],
+                "saved_count": 0,
+                "errors": [],
+                "messages": [],
+                "next": "",
+                "validator_attempted": True,
+                "storage_attempted": True,
+            },
+            "expected": "END",
+        },
     ]
 
     all_passed = True

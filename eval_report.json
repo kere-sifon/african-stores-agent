@@ -1,0 +1,65 @@
+{
+  "run_label": "Agent test",
+  "generated_at": "2026-06-20T00:32:52.783829+00:00",
+  "aggregate": {
+    "counts": 1,
+    "averages": {
+      "search_precision": 0.5,
+      "validator_accuracy": 1.0,
+      "storage_new_insert_rate": 0.0
+    },
+    "worst": {
+      "search_precision": {
+        "score": 0.5,
+        "where": "Toronto, Ontario / Ashanti African Market"
+      },
+      "validator_accuracy": {
+        "score": 1.0,
+        "where": "Toronto, Ontario / Ashanti African Market"
+      },
+      "storage_new_insert_rate": {
+        "score": 0.0,
+        "where": "Toronto, Ontario / Ashanti African Market"
+      }
+    },
+    "totals": {
+      "total_saved": 0,
+      "total_errors": 0
+    }
+  },
+  "per_run": [
+    {
+      "city": "Toronto, Ontario",
+      "category": "Ashanti African Market",
+      "scores": {
+        "search": {
+          "score": 0.5,
+          "total_chunks": 2,
+          "signal_chunks": 1
+        },
+        "validator": {
+          "score": 1.0,
+          "total": 2,
+          "valid": 2,
+          "invalid": 0,
+          "issues": []
+        },
+        "storage": {
+          "score": 0.0,
+          "total": 2,
+          "new_inserts": 0,
+          "duplicates": 0,
+          "skipped": 2,
+          "errors": 0
+        },
+        "summary": {
+          "search_precision": 0.5,
+          "validator_accuracy": 1.0,
+          "storage_new_insert_rate": 0.0,
+          "total_saved": 0,
+          "total_errors": 0
+        }
+      }
+    }
+  ]
+}

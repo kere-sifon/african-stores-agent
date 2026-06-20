@@ -72,16 +72,28 @@ class AgentState(TypedDict):
     # Task context (set once at entry, read-only for specialists)
     city: str
     category: str
+    # category holds EITHER a store category ("African grocery store") used
+    # for an open crawl, OR a specific store name ("Ashanti African Market")
+    # when searching for one named store. is_named_store disambiguates which
+    # mode this run is in, since the two need different search phrasing.
+    is_named_store: bool
 
     # Handoff channels (each specialist appends to its output channel)
     messages: Annotated[list[BaseMessage], operator.add]
     search_results: Annotated[list[str], operator.add]  # raw text from SearchAgent
     validated_stores: Annotated[list[str], operator.add]  # JSON strings from ValidatorAgent
     errors: Annotated[list[str], operator.add]  # non-fatal errors from any agent
+    save_log: Annotated[list[str], operator.add]  # raw save_store_to_db return strings
+    # from StorageAgent only — used by eval_agents.evaluate_storage_dedup instead
+    # of reconstructing from shared `messages`, which mixes all three agents'
+    # output and over-counts (see eval_agents._extract_save_log docstring)
 
     # Mutable counters (supervisor updates these)
     saved_count: int
     validator_attempted: bool  # True after ValidatorAgent has run once — prevents re-validate loop
+    storage_attempted: bool  # True after StorageAgent has run once — prevents re-storage loop
+    # when validated stores are all duplicates / saves silently fail (e.g. weak
+    # local LLM tool-calling)
 
     # Routing signal — supervisor writes, graph reads
     next: str
@@ -169,17 +181,19 @@ def supervisor_node(state: AgentState) -> dict:
     saved_count = state.get("saved_count", 0)
     errors = state.get("errors", [])
     validator_attempted = state.get("validator_attempted", False)
+    storage_attempted = state.get("storage_attempted", False)
 
     # ── Log the full state snapshot received ──────────────────────────────────
     logger.info(
         "SUPERVISOR ROUTING | city=%s | search_results=%d | validated_stores=%d | "
-        "saved_count=%d | errors=%d | validator_attempted=%s",
+        "saved_count=%d | errors=%d | validator_attempted=%s | storage_attempted=%s",
         city,
         len(search_results),
         len(validated_stores),
         saved_count,
         len(errors),
         validator_attempted,
+        storage_attempted,
     )
 
     # ── Routing logic ─────────────────────────────────────────────────────────
@@ -227,8 +241,8 @@ def supervisor_node(state: AgentState) -> dict:
             errors,
         )
 
-    # Rule 3: Have validated stores → run storage
-    elif validated_stores and saved_count == 0:
+    # Rule 3: Have validated stores, storage not yet attempted → run storage
+    elif validated_stores and saved_count == 0 and not storage_attempted:
         decision = "storage"
         logger.info(
             "SUPERVISOR DECISION → %s (reason: %d validated stores ready to save)",
@@ -236,7 +250,19 @@ def supervisor_node(state: AgentState) -> dict:
             len(validated_stores),
         )
 
-    # Rule 4: Storage completed → done
+    # Rule 3b: Storage already ran once but saved nothing new (all duplicates,
+    # or save calls silently failed) → END rather than retrying forever.
+    # This mirrors Rule 2b for the validator — one attempt per specialist,
+    # then accept the outcome.
+    elif validated_stores and saved_count == 0 and storage_attempted:
+        decision = "END"
+        logger.info(
+            "SUPERVISOR DECISION → %s (reason: storage ran but saved 0 new stores"
+            " — likely all duplicates or save failures — accepting outcome)",
+            decision,
+        )
+
+    # Rule 4: Storage completed with saves → done
     elif saved_count > 0:
         decision = "END"
         logger.info(
@@ -268,21 +294,40 @@ def search_agent_node(state: AgentState) -> dict:
     """
     city = state.get("city", "")
     category = state.get("category", "African store")
+    is_named_store = state.get("is_named_store", False)
 
-    search_logger.info("SearchAgent START | city=%s | category=%s", city, category)
+    search_logger.info(
+        "SearchAgent START | city=%s | category=%s | is_named_store=%s",
+        city,
+        category,
+        is_named_store,
+    )
 
     llm = get_llm()
     tools = get_search_tools()
     llm_with_tools = llm.bind_tools(tools)
 
+    if is_named_store:
+        # category holds a specific store name here, not a category — search
+        # for that exact business, not a class of businesses. Pluralizing or
+        # generalizing a proper noun ("Ashanti African Markets") produces a
+        # nonsensical query, so this branch is phrased completely differently
+        # from the category-crawl branch below.
+        task_text = (
+            f'Find the specific store "{category}" in {city}, Canada. '
+            f"Search for this exact business by name, then scrape up to 5 "
+            f"promising URLs (its website, directory listings, reviews) for "
+            f"its address, phone, and other contact details."
+        )
+    else:
+        task_text = (
+            f"Find {category}s in {city}, Canada. "
+            f"Search once, then scrape up to 5 promising URLs for store details."
+        )
+
     messages = [
         SystemMessage(content=SEARCH_SYSTEM),
-        HumanMessage(
-            content=(
-                f"Find {category}s in {city}, Canada. "
-                f"Search once, then scrape up to 5 promising URLs for store details."
-            )
-        ),
+        HumanMessage(content=task_text),
     ]
 
     # Run the search agent loop (search → scrape → done)
@@ -451,6 +496,7 @@ def storage_agent_node(state: AgentState) -> dict:
     tool_node = ToolNode(tools)
     new_saved_count = 0
     new_errors: list[str] = []
+    save_log: list[str] = []  # raw save_store_to_db results — for eval_agents only
 
     try:
         response = llm_with_tools.invoke(messages)
@@ -461,10 +507,18 @@ def storage_agent_node(state: AgentState) -> dict:
             tool_messages = tool_results.get("messages", [])
             messages.extend(tool_messages)
 
-            # Count successful saves from tool output
+            # Count successful saves from tool output.
+            # Only save_store_to_db results go into save_log — get_database_stats
+            # results are excluded by checking the originating tool name, so the
+            # eval module's dedup-rate calculation isn't polluted by unrelated
+            # tool output or unrelated "Error" text elsewhere in the run.
             for msg in tool_messages:
+                tool_name = getattr(msg, "name", "")
+                if tool_name != "save_store_to_db":
+                    continue
                 if hasattr(msg, "content") and msg.content:
                     content = str(msg.content)
+                    save_log.append(content)
                     if content.startswith("Saved:"):
                         new_saved_count += 1
                         storage_logger.info("StorageAgent: %s", content)
@@ -493,9 +547,12 @@ def storage_agent_node(state: AgentState) -> dict:
         "next": "supervisor",
         "messages": messages,
         "saved_count": state.get("saved_count", 0) + new_saved_count,
+        "storage_attempted": True,
     }
     if new_errors:
         state_update["errors"] = new_errors
+    if save_log:
+        state_update["save_log"] = save_log
 
     return state_update
 
@@ -640,31 +697,45 @@ def build_supervisor_agent(use_checkpointing: bool = True):
 # ── Run helper ─────────────────────────────────────────────────────────────────
 
 
-def run_supervisor_for_city(app, city: str, category: str) -> dict:
+def run_supervisor_for_city(app, city: str, category: str, is_named_store: bool = False) -> dict:
     """
     Run one supervisor pipeline: find + validate + save stores in a city.
 
     thread_id is unique per city+category so checkpointing state is isolated.
     The recursion_limit=25 in config is the last line of defense against loops.
+
+    Args:
+        is_named_store: True when `category` is actually a specific store
+            name (the --names / --names-file CLI path), not a store category.
+            Changes how the Search Agent phrases its query — see
+            search_agent_node for why this distinction matters.
     """
     import uuid
 
     thread_id = f"supervisor-{city}-{category}-{uuid.uuid4().hex[:8]}"
 
     logger.info("=" * 60)
-    logger.info("SUPERVISOR RUN START | city=%s | category=%s", city, category)
+    logger.info(
+        "SUPERVISOR RUN START | city=%s | category=%s | is_named_store=%s",
+        city,
+        category,
+        is_named_store,
+    )
     logger.info("thread_id=%s", thread_id)
     logger.info("=" * 60)
 
     initial_state: AgentState = {
         "city": city,
         "category": category,
+        "is_named_store": is_named_store,
         "messages": [],
         "search_results": [],
         "validated_stores": [],
         "errors": [],
         "saved_count": 0,
         "validator_attempted": False,
+        "storage_attempted": False,
+        "save_log": [],
         "next": "",
     }
 

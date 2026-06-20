@@ -448,6 +448,20 @@ jobs:
           NOTIFY_PASSWORD: ${{ secrets.NOTIFY_EMAIL_PASSWORD }}
           NOTIFY_TO:       ${{ secrets.NOTIFY_EMAIL_TO }}
 
+      # ── Upload eval report artifact ───────────────────────────────────────────
+      - name: Upload eval report artifact
+        if: >
+          always() &&
+          steps.mode.outputs.mode != 'smoke' &&
+          steps.mode.outputs.mode != 'generate' &&
+          steps.mode.outputs.mode != 'names'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: eval-report
+          path: eval_report.json
+          retention-days: 90
+          if-no-files-found: ignore
+
       # ── Upload site artifact ──────────────────────────────────────────────────
       - name: Upload site artifact
         if: always() && steps.mode.outputs.mode != 'smoke'

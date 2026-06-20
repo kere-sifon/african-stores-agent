@@ -50,10 +50,17 @@ def record_province_crawl(
     cities_crawled: list[str],
     week_number: int,
     run_id: str = "local",
+    eval_results: list[dict] | None = None,
 ) -> None:
     """
     Upsert crawl record for this province+year+week.
     Sets last_crawled_at to datetime.utcnow().
+
+    If eval_results is provided (list of {"city", "category", "scores"} dicts
+    from eval_agents.evaluate_run()), an aggregated eval_summary is computed
+    and stored alongside the crawl record — this is what powers per-province
+    eval trend queries (e.g. "search precision over the last 10 crawls of
+    Ontario") without needing a separate eval datastore.
     """
     coll = _get_collection()
     if coll is None:
@@ -70,6 +77,12 @@ def record_province_crawl(
         "year": year,
         "run_id": run_id,
     }
+
+    if eval_results is not None:
+        from eval_agents import aggregate_run_evals
+
+        doc["eval_summary"] = aggregate_run_evals(eval_results)
+
     try:
         coll.update_one(
             {"province": province, "year": year, "week_number": week_number},
@@ -135,6 +148,31 @@ def get_crawl_coverage() -> list[dict]:
         results.append(entry)
 
     return results
+
+
+def get_eval_trend(province: str | None = None, limit: int = 20) -> list[dict]:
+    """
+    Return recent crawl records with eval_summary populated, most recent first.
+    Pass province to filter to a single province; omit for all provinces
+    (useful for an "eval trend over time" chart on the ops dashboard).
+
+    Only records that actually have an eval_summary are returned — older
+    crawl_history records predating this feature won't have one.
+    """
+    coll = _get_collection()
+    if coll is None:
+        return []
+
+    query: dict = {"eval_summary": {"$exists": True}}
+    if province:
+        query["province"] = province
+
+    try:
+        cursor = coll.find(query, sort=[("last_crawled_at", -1)], limit=limit)
+        return list(cursor)
+    except PyMongoError as e:
+        print(f"  [crawl_tracker] Warning: failed to read eval trend ({e})")
+        return []
 
 
 def was_crawled_this_week(province: str) -> bool:
