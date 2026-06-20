@@ -136,6 +136,7 @@ def run_names_pipeline(store_names: list[str], city: str) -> None:
 def run_city_crawl(city: str, use_agent: bool) -> None:
     if use_agent:
         from config import SEARCH_QUERIES
+        from cost_tracking import combine_run_usages, print_usage_report, run_usage_from_state
         from eval_agents import (
             aggregate_run_evals,
             evaluate_run,
@@ -147,11 +148,13 @@ def run_city_crawl(city: str, use_agent: bool) -> None:
 
         app = build_supervisor_agent()
         eval_results: list[dict] = []
+        run_usages: list = []
         for category in SEARCH_QUERIES:
             try:
                 result = run_supervisor_for_city(app, city, category)
                 scores = evaluate_run(result)
                 eval_results.append({"city": city, "category": category, "scores": scores})
+                run_usages.append(run_usage_from_state(result))
             except Exception as e:
                 print(f"  [supervisor] Error on ({city}, {category}): {e} — continuing...")
 
@@ -160,6 +163,9 @@ def run_city_crawl(city: str, use_agent: bool) -> None:
         print_run_summary(aggregate, run_label)
         write_eval_report_json(aggregate, eval_results, run_label)
         write_step_summary_markdown(aggregate, run_label)
+
+        if run_usages:
+            print_usage_report(combine_run_usages(run_usages), run_label)
     else:
         from pipeline import run_city_pipeline
 
@@ -170,6 +176,12 @@ def run_city_crawl(city: str, use_agent: bool) -> None:
 def run_province(province: str, run_id: str = "local") -> None:
     """Crawl all cities in a province using the multi-agent supervisor."""
     from config import SEARCH_QUERIES
+    from cost_tracking import (
+        aggregate_crawl_usage,
+        combine_run_usages,
+        print_usage_report,
+        run_usage_from_state,
+    )
     from crawl_tracker import record_province_crawl
     from eval_agents import (
         aggregate_run_evals,
@@ -196,19 +208,30 @@ def run_province(province: str, run_id: str = "local") -> None:
 
     app = build_supervisor_agent()
     eval_results: list[dict] = []
+    run_usages: list = []
     for city in cities:
         for category in SEARCH_QUERIES:
             try:
                 result = run_supervisor_for_city(app, city, category)
                 scores = evaluate_run(result)
                 eval_results.append({"city": city, "category": category, "scores": scores})
+                run_usages.append(run_usage_from_state(result))
             except Exception as e:
                 print(f"  [supervisor] Error on ({city}, {category}): {e} — continuing...")
 
     after = get_stats()["total"]
     saved = after - before
     week = datetime.now().isocalendar()[1]
-    record_province_crawl(canonical, saved, cities, week, run_id, eval_results=eval_results)
+    usage_summary = aggregate_crawl_usage(run_usages) if run_usages else None
+    record_province_crawl(
+        canonical,
+        saved,
+        cities,
+        week,
+        run_id,
+        eval_results=eval_results,
+        usage_summary=usage_summary,
+    )
 
     print(f"\n[crawl] Province crawl complete: {canonical}")
     print(f"[crawl] New stores saved: {saved}")
@@ -219,6 +242,9 @@ def run_province(province: str, run_id: str = "local") -> None:
     print_run_summary(aggregate, run_label)
     write_eval_report_json(aggregate, eval_results, run_label)
     write_step_summary_markdown(aggregate, run_label)
+
+    if run_usages:
+        print_usage_report(combine_run_usages(run_usages), run_label)
 
     print_stats()
     generate()
@@ -295,6 +321,7 @@ def reset_cycle() -> None:
 
 def run_agent_test(store_names: list[str] | None, city: str) -> None:
     from config import llm_config_summary
+    from cost_tracking import combine_run_usages, print_usage_report, run_usage_from_state
     from eval_agents import (
         aggregate_run_evals,
         evaluate_run,
@@ -307,6 +334,7 @@ def run_agent_test(store_names: list[str] | None, city: str) -> None:
     init_db()
     app = build_supervisor_agent()
     eval_results: list[dict] = []
+    run_usages: list = []
 
     if store_names:
         print(f"🤖 Supervisor — named stores in {city}")
@@ -317,6 +345,7 @@ def run_agent_test(store_names: list[str] | None, city: str) -> None:
                 eval_results.append(
                     {"city": city, "category": name, "scores": evaluate_run(result)}
                 )
+                run_usages.append(run_usage_from_state(result))
             except Exception as e:
                 print(f"  [supervisor] Error on {name}: {e} — continuing...")
     else:
@@ -330,11 +359,15 @@ def run_agent_test(store_names: list[str] | None, city: str) -> None:
                 "scores": evaluate_run(result),
             }
         )
+        run_usages.append(run_usage_from_state(result))
 
     aggregate = aggregate_run_evals(eval_results)
     print_run_summary(aggregate, "Agent test")
     write_eval_report_json(aggregate, eval_results, "Agent test")
     write_step_summary_markdown(aggregate, "Agent test")
+
+    if run_usages:
+        print_usage_report(combine_run_usages(run_usages), "Agent test")
 
     print_stats()
     generate()
@@ -342,6 +375,7 @@ def run_agent_test(store_names: list[str] | None, city: str) -> None:
 
 def run_agent_full():
     from config import SEARCH_QUERIES, TARGET_CITIES
+    from cost_tracking import combine_run_usages, print_usage_report, run_usage_from_state
     from eval_agents import (
         aggregate_run_evals,
         evaluate_run,
@@ -356,6 +390,7 @@ def run_agent_full():
     total = len(TARGET_CITIES) * len(SEARCH_QUERIES)
     completed = 0
     eval_results: list[dict] = []
+    run_usages: list = []
     for city in TARGET_CITIES:
         for category in SEARCH_QUERIES:
             completed += 1
@@ -365,6 +400,7 @@ def run_agent_full():
                 eval_results.append(
                     {"city": city, "category": category, "scores": evaluate_run(result)}
                 )
+                run_usages.append(run_usage_from_state(result))
             except Exception as e:
                 print(f"  [supervisor] Error on ({city}, {category}): {e} \u2014 continuing...")
 
@@ -373,6 +409,9 @@ def run_agent_full():
     print_run_summary(aggregate, run_label)
     write_eval_report_json(aggregate, eval_results, run_label)
     write_step_summary_markdown(aggregate, run_label)
+
+    if run_usages:
+        print_usage_report(combine_run_usages(run_usages), run_label)
 
     generate()
 

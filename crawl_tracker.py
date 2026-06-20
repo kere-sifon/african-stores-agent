@@ -51,6 +51,7 @@ def record_province_crawl(
     week_number: int,
     run_id: str = "local",
     eval_results: list[dict] | None = None,
+    usage_summary: dict | None = None,
 ) -> None:
     """
     Upsert crawl record for this province+year+week.
@@ -61,6 +62,11 @@ def record_province_crawl(
     and stored alongside the crawl record — this is what powers per-province
     eval trend queries (e.g. "search precision over the last 10 crawls of
     Ontario") without needing a separate eval datastore.
+
+    If usage_summary is provided (the dict from
+    cost_tracking.aggregate_crawl_usage()), it's stored alongside as
+    token_usage_summary — same trend-query pattern, for "cost per crawl
+    over time" rather than building a separate billing datastore.
     """
     coll = _get_collection()
     if coll is None:
@@ -82,6 +88,9 @@ def record_province_crawl(
         from eval_agents import aggregate_run_evals
 
         doc["eval_summary"] = aggregate_run_evals(eval_results)
+
+    if usage_summary is not None:
+        doc["token_usage_summary"] = usage_summary
 
     try:
         coll.update_one(
@@ -172,6 +181,31 @@ def get_eval_trend(province: str | None = None, limit: int = 20) -> list[dict]:
         return list(cursor)
     except PyMongoError as e:
         print(f"  [crawl_tracker] Warning: failed to read eval trend ({e})")
+        return []
+
+
+def get_cost_trend(province: str | None = None, limit: int = 20) -> list[dict]:
+    """
+    Return recent crawl records with token_usage_summary populated, most
+    recent first. Pass province to filter to a single province; omit for
+    all provinces (useful for a "cost over time" chart on the ops dashboard).
+
+    Only records that actually have a token_usage_summary are returned —
+    older crawl_history records predating this feature won't have one.
+    """
+    coll = _get_collection()
+    if coll is None:
+        return []
+
+    query: dict = {"token_usage_summary": {"$exists": True}}
+    if province:
+        query["province"] = province
+
+    try:
+        cursor = coll.find(query, sort=[("last_crawled_at", -1)], limit=limit)
+        return list(cursor)
+    except PyMongoError as e:
+        print(f"  [crawl_tracker] Warning: failed to read cost trend ({e})")
         return []
 
 
