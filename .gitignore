@@ -39,3 +39,7 @@ ARCHITECTURE.md
 docs/bedrock-iam-policy.json
 docs/github-oidc-role-policy.json
 docs/github-oidc-trust-policy.json
+
+# Patch files and generated eval artifacts — never commit these
+*.patch
+eval_report.json
