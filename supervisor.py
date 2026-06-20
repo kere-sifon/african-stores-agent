@@ -42,7 +42,8 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
 
-from config import MONGODB_URI, get_llm
+from config import LLM_PROVIDER, MONGODB_URI, get_llm
+from cost_tracking import extract_usage
 from tools_search import get_search_tools
 from tools_storage import get_storage_tools
 from tools_validator import get_validator_tools
@@ -87,6 +88,9 @@ class AgentState(TypedDict):
     # from StorageAgent only — used by eval_agents.evaluate_storage_dedup instead
     # of reconstructing from shared `messages`, which mixes all three agents'
     # output and over-counts (see eval_agents._extract_save_log docstring)
+    usage_log: Annotated[list[dict], operator.add]  # CallUsage.__dict__ entries
+    # from every LLM invocation across all three specialist agents — see
+    # cost_tracking.py. Each agent node appends one dict per LLM call it makes.
 
     # Mutable counters (supervisor updates these)
     saved_count: int
@@ -142,8 +146,19 @@ Tools available: check_store_exists
 For each candidate store you identify in the search_results:
 1. Call check_store_exists("Store Name, City") to avoid duplicates
 2. If NOT FOUND: output a JSON object with fields:
-   name, category, city, province, address, phone, website, description, source_url
+   name, category, city, province, address, phone, website, description,
+   source_url, confidence
 3. If EXISTS: skip it
+
+The "confidence" field must be either "high" or "low":
+- "high": name, city, and at least one contact field (address/phone/website)
+  are all DIRECTLY STATED in the source text — you did not have to guess
+  or infer any of them.
+- "low": you had to infer or guess at any field — e.g. the city wasn't
+  explicitly stated and you inferred it from context, the phone number
+  format was ambiguous, or the source text was unclear about whether this
+  is the exact business being searched for vs. a similarly-named one.
+  When in doubt, use "low" rather than "high" — a human will review it.
 
 Output each valid store as a separate JSON string on its own line.
 Do NOT save anything to the database. Do NOT scrape new URLs.
@@ -334,11 +349,17 @@ def search_agent_node(state: AgentState) -> dict:
     tool_node = ToolNode(tools)
     new_results: list[str] = []
     new_errors: list[str] = []
+    new_usage: list[dict] = []
 
     try:
         # Single reasoning step — agent decides searches + scrapes
         response = llm_with_tools.invoke(messages)
         messages.append(response)
+        new_usage.append(
+            extract_usage(
+                response, agent="search", call_type="reasoning", provider=LLM_PROVIDER
+            ).__dict__
+        )
 
         # Execute any tool calls
         if hasattr(response, "tool_calls") and response.tool_calls:
@@ -356,6 +377,11 @@ def search_agent_node(state: AgentState) -> dict:
             # Second reasoning step — agent may want to scrape more
             response2 = llm_with_tools.invoke(messages)
             messages.append(response2)
+            new_usage.append(
+                extract_usage(
+                    response2, agent="search", call_type="followup", provider=LLM_PROVIDER
+                ).__dict__
+            )
 
             if hasattr(response2, "tool_calls") and response2.tool_calls:
                 tool_results2 = tool_node.invoke({"messages": messages})
@@ -380,6 +406,8 @@ def search_agent_node(state: AgentState) -> dict:
         state_update["search_results"] = new_results
     if new_errors:
         state_update["errors"] = new_errors
+    if new_usage:
+        state_update["usage_log"] = new_usage
 
     return state_update
 
@@ -388,10 +416,20 @@ def validator_agent_node(state: AgentState) -> dict:
     """
     Validator Agent — bounded to check_store_exists only.
     Reads search_results, emits validated JSON strings to validated_stores.
-    Never writes to the database.
+    Never writes to the main stores database.
+
+    Low-confidence candidates (per the "confidence" field the Validator is
+    instructed to emit — see VALIDATOR_SYSTEM) are written directly to the
+    pending_review queue instead of validated_stores, for human review via
+    the ops dashboard rather than being silently dropped or auto-accepted.
+    This write happens here rather than being threaded through AgentState
+    because pending_review entries don't need supervisor routing or
+    storage-agent involvement — they're a side channel, not part of the
+    main accept/save pipeline.
     """
     search_results = state.get("search_results", [])
     city = state.get("city", "")
+    category = state.get("category", "")
 
     validator_logger.info(
         "ValidatorAgent START | city=%s | evaluating %d result chunks",
@@ -419,10 +457,17 @@ def validator_agent_node(state: AgentState) -> dict:
     tool_node = ToolNode(tools)
     new_validated: list[str] = []
     new_errors: list[str] = []
+    new_usage: list[dict] = []
+    needs_review: list[dict] = []
 
     try:
         response = llm_with_tools.invoke(messages)
         messages.append(response)
+        new_usage.append(
+            extract_usage(
+                response, agent="validate", call_type="reasoning", provider=LLM_PROVIDER
+            ).__dict__
+        )
 
         # Execute existence checks
         if hasattr(response, "tool_calls") and response.tool_calls:
@@ -432,25 +477,46 @@ def validator_agent_node(state: AgentState) -> dict:
             # Final reasoning — agent outputs JSON for each valid store
             final_response = llm_with_tools.invoke(messages)
             messages.append(final_response)
+            new_usage.append(
+                extract_usage(
+                    final_response, agent="validate", call_type="followup", provider=LLM_PROVIDER
+                ).__dict__
+            )
 
             # Parse validated store JSON blocks from final response
             if hasattr(final_response, "content") and final_response.content:
                 content = final_response.content
-                new_validated.extend(_extract_json_blocks(content, city, validator_logger))
+                validated, review = _extract_json_blocks(content, city, validator_logger)
+                new_validated.extend(validated)
+                needs_review.extend(review)
 
         else:
             # No tool calls — extract JSON directly from initial response
             if hasattr(response, "content") and response.content:
-                new_validated.extend(_extract_json_blocks(response.content, city, validator_logger))
+                validated, review = _extract_json_blocks(response.content, city, validator_logger)
+                new_validated.extend(validated)
+                needs_review.extend(review)
 
     except Exception as e:
         err_msg = f"ValidatorAgent error: {e}"
         validator_logger.error(err_msg)
         new_errors.append(err_msg)
 
+    if needs_review:
+        from pending_review import record_pending_review
+
+        for store_dict in needs_review:
+            record_pending_review(
+                store=store_dict,
+                city=city,
+                category=category,
+                reason="Validator confidence=low — needs human review",
+            )
+
     validator_logger.info(
-        "ValidatorAgent DONE | validated=%d stores | errors=%d",
+        "ValidatorAgent DONE | validated=%d stores | flagged_for_review=%d | errors=%d",
         len(new_validated),
+        len(needs_review),
         len(new_errors),
     )
 
@@ -459,6 +525,8 @@ def validator_agent_node(state: AgentState) -> dict:
         state_update["validated_stores"] = new_validated
     if new_errors:
         state_update["errors"] = new_errors
+    if new_usage:
+        state_update["usage_log"] = new_usage
 
     return state_update
 
@@ -497,10 +565,16 @@ def storage_agent_node(state: AgentState) -> dict:
     new_saved_count = 0
     new_errors: list[str] = []
     save_log: list[str] = []  # raw save_store_to_db results — for eval_agents only
+    new_usage: list[dict] = []
 
     try:
         response = llm_with_tools.invoke(messages)
         messages.append(response)
+        new_usage.append(
+            extract_usage(
+                response, agent="storage", call_type="reasoning", provider=LLM_PROVIDER
+            ).__dict__
+        )
 
         if hasattr(response, "tool_calls") and response.tool_calls:
             tool_results = tool_node.invoke({"messages": messages})
@@ -528,6 +602,11 @@ def storage_agent_node(state: AgentState) -> dict:
             # Final step — get database stats + summary
             final = llm_with_tools.invoke(messages)
             messages.append(final)
+            new_usage.append(
+                extract_usage(
+                    final, agent="storage", call_type="followup", provider=LLM_PROVIDER
+                ).__dict__
+            )
             if hasattr(final, "tool_calls") and final.tool_calls:
                 final_tools = tool_node.invoke({"messages": messages})
                 messages.extend(final_tools.get("messages", []))
@@ -553,6 +632,8 @@ def storage_agent_node(state: AgentState) -> dict:
         state_update["errors"] = new_errors
     if save_log:
         state_update["save_log"] = save_log
+    if new_usage:
+        state_update["usage_log"] = new_usage
 
     return state_update
 
@@ -573,15 +654,41 @@ def route_from_supervisor(state: AgentState) -> str:
 # ── Helper: JSON block extractor ───────────────────────────────────────────────
 
 
-def _extract_json_blocks(content: str, city: str, log: logging.Logger) -> list[str]:
+def _extract_json_blocks(
+    content: str, city: str, log: logging.Logger
+) -> tuple[list[str], list[dict]]:
     """
     Parse JSON store objects from LLM output text.
     Handles both ```json fenced blocks and bare JSON objects.
-    Returns a list of validated JSON strings.
+
+    Splits results by the "confidence" field the Validator is instructed to
+    emit (see VALIDATOR_SYSTEM): "high" confidence stores are returned as
+    JSON strings ready for validated_stores (same as before this field
+    existed); "low" confidence stores are returned as raw dicts for the
+    caller to route to the pending_review queue instead. A missing or
+    unrecognized confidence value defaults to "low" — fail toward human
+    review rather than silently auto-accepting unclear output.
+
+    Returns:
+        (validated_json_strings, low_confidence_dicts)
     """
     import re
 
     validated: list[str] = []
+    needs_review: list[dict] = []
+
+    def _route(obj: dict) -> None:
+        confidence = str(obj.get("confidence", "low")).strip().lower()
+        if confidence == "high":
+            validated.append(json.dumps(obj))
+            log.debug("ValidatorAgent: accepted store=%s (high confidence)", obj.get("name"))
+        else:
+            needs_review.append(obj)
+            log.info(
+                "ValidatorAgent: flagged for review store=%s (confidence=%s)",
+                obj.get("name"),
+                confidence,
+            )
 
     # Try fenced code blocks first
     fenced = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
@@ -592,11 +699,10 @@ def _extract_json_blocks(content: str, city: str, log: logging.Logger) -> list[s
                 if obj.get("name") and (obj.get("city") or city):
                     if not obj.get("city"):
                         obj["city"] = city
-                    validated.append(json.dumps(obj))
-                    log.debug("ValidatorAgent: accepted store=%s", obj.get("name"))
+                    _route(obj)
             except json.JSONDecodeError:
                 pass
-        return validated
+        return validated, needs_review
 
     # Fallback: bare JSON objects (one per line or multi-line)
     bare = re.findall(r"\{[^{}]+\}", content, re.DOTALL)
@@ -606,12 +712,11 @@ def _extract_json_blocks(content: str, city: str, log: logging.Logger) -> list[s
             if obj.get("name") and len(obj) >= 3:
                 if not obj.get("city"):
                     obj["city"] = city
-                validated.append(json.dumps(obj))
-                log.debug("ValidatorAgent: accepted store=%s (bare JSON)", obj.get("name"))
+                _route(obj)
         except json.JSONDecodeError:
             pass
 
-    return validated
+    return validated, needs_review
 
 
 # ── Graph construction ─────────────────────────────────────────────────────────
@@ -736,6 +841,7 @@ def run_supervisor_for_city(app, city: str, category: str, is_named_store: bool 
         "validator_attempted": False,
         "storage_attempted": False,
         "save_log": [],
+        "usage_log": [],
         "next": "",
     }
 

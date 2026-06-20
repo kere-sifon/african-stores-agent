@@ -377,6 +377,59 @@ def test_eval_module() -> bool:
     return True
 
 
+# ── Stage 5: Confidence extraction (HITL escalation) unit tests ────────────────
+
+
+def test_confidence_extraction() -> bool:
+    """
+    Unit-test _extract_json_blocks's confidence-based routing.
+    No LLM calls — pure parsing logic, testing the HITL escalation split
+    between validated_stores (high confidence) and pending_review (low
+    confidence / missing confidence field).
+    """
+    logger.info("── Stage 5: Confidence extraction unit tests ──")
+    from supervisor import _extract_json_blocks
+
+    all_passed = True
+
+    # Case 1: high confidence → validated, not flagged for review
+    content = (
+        '```json\n{"name": "Test Store A", "city": "Toronto", "address": "1 St", '
+        '"confidence": "high"}\n```'
+    )
+    validated, review = _extract_json_blocks(content, "Toronto", logger)
+    passed = len(validated) == 1 and len(review) == 0
+    logger.info("%s high confidence → validated, not flagged", "✓" if passed else "✗")
+    all_passed = all_passed and passed
+
+    # Case 2: low confidence → flagged for review, not validated
+    content = '```json\n{"name": "Test Store B", "city": "Toronto", "confidence": "low"}\n```'
+    validated, review = _extract_json_blocks(content, "Toronto", logger)
+    passed = len(validated) == 0 and len(review) == 1
+    logger.info("%s low confidence → flagged, not validated", "✓" if passed else "✗")
+    all_passed = all_passed and passed
+
+    # Case 3: missing confidence field → defaults to low (fail toward review,
+    # not toward silent auto-acceptance)
+    content = '```json\n{"name": "Test Store C", "city": "Toronto", "address": "2 St"}\n```'
+    validated, review = _extract_json_blocks(content, "Toronto", logger)
+    passed = len(validated) == 0 and len(review) == 1
+    logger.info("%s missing confidence field → defaults to flagged", "✓" if passed else "✗")
+    all_passed = all_passed and passed
+
+    # Case 4: mixed batch — confidence is evaluated per-store, not globally
+    content = (
+        '```json\n{"name": "D", "city": "Toronto", "address": "1", "confidence": "high"}\n```\n'
+        '```json\n{"name": "E", "city": "Toronto", "confidence": "low"}\n```'
+    )
+    validated, review = _extract_json_blocks(content, "Toronto", logger)
+    passed = len(validated) == 1 and len(review) == 1
+    logger.info("%s mixed batch → split correctly per-store", "✓" if passed else "✗")
+    all_passed = all_passed and passed
+
+    return all_passed
+
+
 # ── CLI entrypoint ─────────────────────────────────────────────────────────────
 
 
@@ -394,6 +447,7 @@ def main():
     results["tool_boundaries"] = test_tool_boundaries()
     results["supervisor_routing"] = test_supervisor_routing()
     results["eval_module"] = test_eval_module()
+    results["confidence_extraction"] = test_confidence_extraction()
 
     if not args.smoke:
         results["integration"] = test_integration(args.city, args.category)
