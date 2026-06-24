@@ -9,7 +9,7 @@ langgraph>=1.2.5               # StateGraph, ToolNode, conditional edges
 langgraph-checkpoint-mongodb>=0.4.0  # MongoDB checkpointer for resumable runs
 
 # AWS
-boto3>=1.35.0
+boto3>=1.43.36
 
 # Search (DuckDuckGo backend for langchain-community)
 ddgs>=9.0.0
