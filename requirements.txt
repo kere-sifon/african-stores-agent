@@ -9,15 +9,15 @@ langgraph>=1.2.5               # StateGraph, ToolNode, conditional edges
 langgraph-checkpoint-mongodb>=0.4.0  # MongoDB checkpointer for resumable runs
 
 # AWS
-boto3>=1.35.0
+boto3>=1.43.36
 
 # Search (DuckDuckGo backend for langchain-community)
-ddgs>=9.0.0
+ddgs>=9.14.4
 
 # Web scraping
-requests>=2.31.0
+requests>=2.34.2
 beautifulsoup4>=4.12.0
-lxml>=5.0.0
+lxml>=6.1.1
 
 # Data & storage
 pydantic>=2.0.0                # Structured output / data models
