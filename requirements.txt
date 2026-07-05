@@ -12,7 +12,7 @@ langgraph-checkpoint-mongodb>=0.4.0  # MongoDB checkpointer for resumable runs
 boto3>=1.43.36
 
 # Search (DuckDuckGo backend for langchain-community)
-ddgs>=9.0.0
+ddgs>=9.14.4
 
 # Web scraping
 requests>=2.34.2
