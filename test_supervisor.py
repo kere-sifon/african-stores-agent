@@ -333,48 +333,76 @@ def test_integration(city: str, category: str) -> bool:
 
 def test_eval_module() -> bool:
     """Unit-test the eval module with synthetic data."""
+    import json
+
     logger.info("── Stage 4: Eval module unit tests ──")
-    from eval_agents import (
-        evaluate_search_precision,
-        evaluate_storage_dedup,
-        evaluate_validator_accuracy,
-    )
+    try:
+        from eval_agents import (
+            evaluate_search_precision,
+            evaluate_storage_dedup,
+            evaluate_validator_accuracy,
+        )
 
-    # Search precision: 2 of 3 chunks have store signals
-    results = [
-        "Lagos Market 416-555-1234 located at 100 Rexdale Blvd Toronto ON African Grocery Store",
-        "Wikipedia article about African cuisine no business info",
-        "Naija Foods Restaurant 647-555-9876 at 45 Jane St Scarborough ON",
-    ]
-    sp = evaluate_search_precision(results)
-    assert sp["signal_chunks"] >= 1, f"Expected signal chunks, got {sp}"
-    logger.info("✓ search_precision=%s", sp["score"])
+        # Search precision: 2 of 3 chunks have store signals
+        results = [
+            "Lagos Market 555-0100 located at 100 Rexdale Blvd Toronto ON African Grocery Store",
+            "Wikipedia article about African cuisine no business info",
+            "Naija Foods Restaurant 555-0101 at 45 Jane St Scarborough ON",
+        ]
+        sp = evaluate_search_precision(results)
+        if sp["signal_chunks"] < 1:
+            logger.error("Expected signal chunks, got %s", sp)
+            return False
+        logger.info("✓ search_precision=%s", sp["score"])
 
-    # Validator accuracy: 2 valid, 1 missing contact
-    validated = [
-        '{"name": "Lagos Market", "city": "Toronto", "phone": "416-555-1234",'
-        ' "category": "Grocery"}',
-        '{"name": "Naija Foods", "city": "Toronto", "address": "45 Jane St",'
-        ' "category": "Restaurant"}',
-        '{"name": "Unknown Store", "city": "Toronto"}',  # missing contact → invalid
-    ]
-    va = evaluate_validator_accuracy(validated)
-    assert va["valid"] == 2, f"Expected 2 valid, got {va['valid']}"
-    assert va["invalid"] == 1, f"Expected 1 invalid, got {va['invalid']}"
-    logger.info("✓ validator_accuracy=%s", va["score"])
+        # Validator accuracy: 2 valid, 1 missing contact
+        validated = [
+            json.dumps(
+                {
+                    "name": "Lagos Market",
+                    "city": "Toronto",
+                    "phone": "555-0100",
+                    "category": "Grocery",
+                }
+            ),
+            json.dumps(
+                {
+                    "name": "Naija Foods",
+                    "city": "Toronto",
+                    "address": "45 Jane St",
+                    "category": "Restaurant",
+                }
+            ),
+            json.dumps({"name": "Unknown Store", "city": "Toronto"}),
+        ]
+        va = evaluate_validator_accuracy(validated)
+        if va["valid"] != 2:
+            logger.error("Expected 2 valid, got %s", va["valid"])
+            return False
+        if va["invalid"] != 1:
+            logger.error("Expected 1 invalid, got %s", va["invalid"])
+            return False
+        logger.info("✓ validator_accuracy=%s", va["score"])
 
-    # Storage dedup: 2 new inserts, 1 dup
-    save_log = [
-        "Saved: Lagos Market (Toronto)",
-        "Saved: Naija Foods (Toronto)",
-        "Already in database: Old Store (Toronto)",
-    ]
-    sd = evaluate_storage_dedup(save_log)
-    assert sd["new_inserts"] == 2, f"Expected 2 new inserts, got {sd['new_inserts']}"
-    assert sd["duplicates"] == 1, f"Expected 1 dup, got {sd['duplicates']}"
-    logger.info("✓ storage_dedup_rate=%s", sd["score"])
+        # Storage dedup: 2 new inserts, 1 dup
+        save_log = [
+            "Saved: Lagos Market (Toronto)",
+            "Saved: Naija Foods (Toronto)",
+            "Already in database: Old Store (Toronto)",
+        ]
+        sd = evaluate_storage_dedup(save_log)
+        if sd["new_inserts"] != 2:
+            logger.error("Expected 2 new inserts, got %s", sd["new_inserts"])
+            return False
+        if sd["duplicates"] != 1:
+            logger.error("Expected 1 dup, got %s", sd["duplicates"])
+            return False
+        logger.info("✓ storage_dedup_rate=%s", sd["score"])
 
-    return True
+        return True
+    except Exception as e:
+        logger.error("✗ Eval module test failed: %s", e)
+        return False
 
 
 # ── Stage 5: Confidence extraction (HITL escalation) unit tests ────────────────

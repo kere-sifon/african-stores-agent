@@ -690,31 +690,32 @@ def _extract_json_blocks(
                 confidence,
             )
 
+    def _parse_json_object(raw: str) -> dict | None:
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            log.debug("ValidatorAgent: skipped malformed JSON fragment")
+            return None
+
     # Try fenced code blocks first
     fenced = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
     if fenced:
         for raw in fenced:
-            try:
-                obj = json.loads(raw)
-                if obj.get("name") and (obj.get("city") or city):
-                    if not obj.get("city"):
-                        obj["city"] = city
-                    _route(obj)
-            except json.JSONDecodeError:
-                pass
+            obj = _parse_json_object(raw)
+            if obj and obj.get("name") and (obj.get("city") or city):
+                if not obj.get("city"):
+                    obj["city"] = city
+                _route(obj)
         return validated, needs_review
 
     # Fallback: bare JSON objects (one per line or multi-line)
     bare = re.findall(r"\{[^{}]+\}", content, re.DOTALL)
     for raw in bare:
-        try:
-            obj = json.loads(raw)
-            if obj.get("name") and len(obj) >= 3:
-                if not obj.get("city"):
-                    obj["city"] = city
-                _route(obj)
-        except json.JSONDecodeError:
-            pass
+        obj = _parse_json_object(raw)
+        if obj and obj.get("name") and len(obj) >= 3:
+            if not obj.get("city"):
+                obj["city"] = city
+            _route(obj)
 
     return validated, needs_review
 
