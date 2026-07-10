@@ -1,0 +1,25 @@
+name: Security Scan Triage
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  triage:
+    name: Scan, triage, and comment
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Run ci-triage-agent
+        uses: kere-sifon/Ci-mvp@v1
+        with:
+          aws-role-to-assume: ${{ secrets.CI_TRIAGE_AWS_ROLE_ARN }}
