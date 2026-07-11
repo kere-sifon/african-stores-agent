@@ -123,10 +123,15 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Validate AWS OIDC configuration
+        env:
+          ROLE_ARN_VAR: ${{ vars.AWS_ROLE_ARN }}
+          ROLE_ARN_SECRET: ${{ secrets.AWS_ROLE_ARN }}
+          WORKFLOW_REF: ${{ github.ref }}
+          REPO_NAME: ${{ github.repository }}
         run: |
-          ROLE_ARN="${{ vars.AWS_ROLE_ARN }}"
+          ROLE_ARN="$ROLE_ARN_VAR"
           if [ -z "$ROLE_ARN" ]; then
-            ROLE_ARN="${{ secrets.AWS_ROLE_ARN }}"
+            ROLE_ARN="$ROLE_ARN_SECRET"
           fi
           if [ -z "$ROLE_ARN" ]; then
             echo "::error::AWS_ROLE_ARN is not set."
@@ -136,8 +141,8 @@ jobs:
             exit 1
           fi
           echo "AWS_ROLE_ARN is set (${#ROLE_ARN} characters)"
-          echo "Workflow ref: ${{ github.ref }}"
-          echo "Repository:   ${{ github.repository }}"
+          echo "Workflow ref: $WORKFLOW_REF"
+          echo "Repository:   $REPO_NAME"
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@254c19bd240aabef8777f48595e9d2d7b972184b  # v6.2.1
@@ -148,12 +153,15 @@ jobs:
 
       - name: Resolve crawl mode
         id: mode
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MODE_INPUT: ${{ inputs.mode }}
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ]; then
+          if [ "$EVENT_NAME" = "schedule" ]; then
             # Weekly cron → province rotation (monthly cron removed)
             echo "mode=province-weekly" >> "$GITHUB_OUTPUT"
           else
-            echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
+            echo "mode=$MODE_INPUT" >> "$GITHUB_OUTPUT"
           fi
 
       # ── Smoke test ────────────────────────────────────────────────────────────
@@ -197,16 +205,20 @@ jobs:
       - name: Run named store crawl
         if: steps.mode.outputs.mode == 'names'
         id: names_crawl
+        env:
+          STORE_NAMES: ${{ inputs.store_names }}
+          CITY_IN: ${{ inputs.city }}
+          USE_AGENT: ${{ inputs.use_agent }}
         run: |
-          if [ -z "${{ inputs.store_names }}" ]; then
+          if [ -z "$STORE_NAMES" ]; then
             echo "::error::store_names input is required when mode=names"
             exit 1
           fi
-          printf '%s' "${{ inputs.store_names }}" > /tmp/store_names.txt
-          if [ "${{ inputs.use_agent }}" = "true" ]; then
-            python run.py --agent --names-file /tmp/store_names.txt --city "${{ inputs.city }}" 2>&1 | tee /tmp/crawl_output.txt
+          printf '%s' "$STORE_NAMES" > /tmp/store_names.txt
+          if [ "$USE_AGENT" = "true" ]; then
+            python run.py --agent --names-file /tmp/store_names.txt --city "$CITY_IN" 2>&1 | tee /tmp/crawl_output.txt
           else
-            python run.py --names-file /tmp/store_names.txt --city "${{ inputs.city }}" 2>&1 | tee /tmp/crawl_output.txt
+            python run.py --names-file /tmp/store_names.txt --city "$CITY_IN" 2>&1 | tee /tmp/crawl_output.txt
           fi
           python run.py --stats 2>&1 | tee -a /tmp/crawl_output.txt
 
@@ -214,15 +226,18 @@ jobs:
       - name: Run city crawl
         if: steps.mode.outputs.mode == 'city'
         id: city_crawl
+        env:
+          CITY_IN: ${{ inputs.city }}
+          USE_AGENT: ${{ inputs.use_agent }}
         run: |
-          if [ -z "${{ inputs.city }}" ]; then
+          if [ -z "$CITY_IN" ]; then
             echo "::error::city input is required when mode=city"
             exit 1
           fi
-          if [ "${{ inputs.use_agent }}" = "true" ]; then
-            python run.py --agent --city-crawl --city "${{ inputs.city }}" 2>&1 | tee /tmp/crawl_output.txt
+          if [ "$USE_AGENT" = "true" ]; then
+            python run.py --agent --city-crawl --city "$CITY_IN" 2>&1 | tee /tmp/crawl_output.txt
           else
-            python run.py --city-crawl --city "${{ inputs.city }}" 2>&1 | tee /tmp/crawl_output.txt
+            python run.py --city-crawl --city "$CITY_IN" 2>&1 | tee /tmp/crawl_output.txt
           fi
           python run.py --stats 2>&1 | tee -a /tmp/crawl_output.txt
 
@@ -239,12 +254,14 @@ jobs:
       - name: Province crawl — manual
         if: steps.mode.outputs.mode == 'province'
         id: province_crawl
+        env:
+          PROVINCE_IN: ${{ inputs.province }}
         run: |
-          if [ -z "${{ inputs.province }}" ]; then
+          if [ -z "$PROVINCE_IN" ]; then
             echo "::error::province input is required when mode=province"
             exit 1
           fi
-          python run.py --province "${{ inputs.province }}" 2>&1 | tee /tmp/crawl_output.txt
+          python run.py --province "$PROVINCE_IN" 2>&1 | tee /tmp/crawl_output.txt
           python run.py --generate
           python run.py --stats 2>&1 | tee -a /tmp/crawl_output.txt
 
@@ -279,7 +296,6 @@ jobs:
           "
           python run.py --generate
           python run.py --stats
-
 
       # ── Build email report ────────────────────────────────────────────────────
       - name: Build crawl report
@@ -411,7 +427,6 @@ jobs:
           print(f"Subject: {subject}")
           print(f"Saved: {saved}, Skipped: {skipped}, Total: {total}")
           PY
-
 
       # ── Send email ────────────────────────────────────────────────────────────
       - name: Send crawl report email
