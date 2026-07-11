@@ -25,3 +25,4 @@ jobs:
           aws-role-to-assume: ${{ secrets.CI_TRIAGE_AWS_ROLE_ARN }}
           s3-bucket: ci-triage-scan-results
           s3-prefix: ""
+          
