@@ -11,6 +11,8 @@ updates:
     labels:
       - dependencies
       - security
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: github-actions
     directory: "/"
@@ -20,3 +22,5 @@ updates:
     labels:
       - dependencies
       - security
+    cooldown:
+      default-days: 7
