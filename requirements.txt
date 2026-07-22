@@ -22,7 +22,7 @@ lxml>=6.1.1
 # Data & storage
 pydantic>=2.0.0                # Structured output / data models
 python-dotenv>=1.2.2
-pymongo[srv]>=4.6.0            # MongoDB Atlas (SRV connection strings)
+pymongo[srv]>=4.17.0            # MongoDB Atlas (SRV connection strings)
 
 # HTML generation
 jinja2>=3.1.6
